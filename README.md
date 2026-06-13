@@ -44,6 +44,15 @@ http://127.0.0.1:8010
 
 Docker環境では、AJAなどのALSA録音デバイスをコンテナへ渡すために `/dev/snd` をマウントします。
 
+簡単起動:
+
+```bash
+cd /home/ubuntu/app/hericheck/get_heri_gps
+./start.sh
+```
+
+手動で起動する場合:
+
 ```bash
 cd /home/ubuntu/app/hericheck/get_heri_gps
 docker compose up --build
