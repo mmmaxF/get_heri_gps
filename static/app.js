@@ -7,6 +7,7 @@ const labels = {
 };
 
 let isRunning = false;
+const defaultChannelsByDevice = new Map();
 
 function formConfig() {
   const device = $("input_device").value;
@@ -67,6 +68,13 @@ function syncCommandPreview() {
   $("input_command").value = `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw`;
 }
 
+function applyDeviceDefaultChannels() {
+  const device = $("input_device").value;
+  const channels = defaultChannelsByDevice.get(device) || 2;
+  $("input_channels").value = channels;
+  syncCommandPreview();
+}
+
 async function loadDevices() {
   try {
     const res = await fetch("/api/devices");
@@ -74,16 +82,18 @@ async function loadDevices() {
     const select = $("input_device");
     const current = select.value;
     select.innerHTML = "";
+    defaultChannelsByDevice.clear();
     for (const item of data.devices || []) {
       const opt = document.createElement("option");
       opt.value = item.device;
       opt.textContent = item.label;
       select.appendChild(opt);
+      defaultChannelsByDevice.set(item.device, item.default_channels || 2);
     }
     if ([...select.options].some((opt) => opt.value === current)) {
       select.value = current;
     }
-    syncCommandPreview();
+    applyDeviceDefaultChannels();
   } catch (e) {
     setError("録音デバイス一覧を取得できませんでした");
   }
@@ -163,7 +173,7 @@ function connect() {
 $("saveBtn").addEventListener("click", () => applyConfig().catch((e) => setError(e.message)));
 $("startBtn").addEventListener("click", () => start().catch((e) => setError(e.message)));
 $("stopBtn").addEventListener("click", () => stop().catch((e) => setError(e.message)));
-$("input_device").addEventListener("change", syncCommandPreview);
+$("input_device").addEventListener("change", applyDeviceDefaultChannels);
 $("input_channels").addEventListener("input", syncCommandPreview);
 
 loadDevices();

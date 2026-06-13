@@ -485,9 +485,9 @@ def list_capture_devices():
         card, card_id, card_name, dev, dev_id, dev_name = m.groups()
         hw = f"hw:{card},{dev}"
         label = f"{card_name} / {dev_name} ({hw})"
-        devices.append({"device": hw, "label": label, "card": int(card), "subdevice": int(dev)})
+        devices.append({"device": hw, "label": label, "card": int(card), "subdevice": int(dev), "default_channels": 2})
     if not devices:
-        devices.append({"device": DEFAULT_INPUT_DEVICE, "label": f"{DEFAULT_INPUT_DEVICE}", "card": None, "subdevice": None})
+        devices.append({"device": DEFAULT_INPUT_DEVICE, "label": f"{DEFAULT_INPUT_DEVICE}", "card": None, "subdevice": None, "default_channels": 2})
     return devices
 
 
