@@ -11,6 +11,8 @@ import shlex
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
@@ -48,6 +50,7 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = env_int("PORT", 8010)
 DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positions.csv"))
 DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
+DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 
 
 def now_jst():
@@ -233,6 +236,7 @@ class RuntimeConfig:
     input_command: str = os.environ.get("INPUT_COMMAND", "arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw")
     test_capture_dir: str = os.environ.get("TEST_CAPTURE_DIR", "../audio_capture/20260613_132355")
     output_csv: str = str(DEFAULT_OUTPUT_CSV)
+    reverse_geocoder_url: str = DEFAULT_REVERSE_GEOCODER_URL
     window_seconds: float = env_float("WINDOW_SECONDS", 20.0)
     decode_interval_seconds: float = env_float("DECODE_INTERVAL_SECONDS", 1.0)
 
@@ -248,6 +252,10 @@ class AppState:
         self.error = ""
         self.total_samples = 0
         self.decoded_count = 0
+        self.geocode_success_count = 0
+        self.geocode_error_count = 0
+        self.latest_geocode = None
+        self.geocode_error = ""
         self.latest = None
         self.recent = deque(maxlen=30)
         self.worker = None
@@ -264,6 +272,10 @@ class AppState:
                 "error": self.error,
                 "total_samples": self.total_samples,
                 "decoded_count": self.decoded_count,
+                "geocode_success_count": self.geocode_success_count,
+                "geocode_error_count": self.geocode_error_count,
+                "latest_geocode": self.latest_geocode,
+                "geocode_error": self.geocode_error,
                 "latest": self.latest,
                 "recent": list(self.recent),
             }
@@ -318,7 +330,20 @@ class AppState:
         with self.lock:
             self.decoded_count += 1
             self.latest = row
+            if row.get("geocode"):
+                self.latest_geocode = row["geocode"]
             self.recent.appendleft(row)
+
+    def mark_geocode_success(self, geocode):
+        with self.lock:
+            self.geocode_success_count += 1
+            self.latest_geocode = geocode
+            self.geocode_error = ""
+
+    def mark_geocode_error(self, error):
+        with self.lock:
+            self.geocode_error_count += 1
+            self.geocode_error = error
 
     def set_samples(self, total_samples):
         with self.lock:
@@ -327,6 +352,38 @@ class AppState:
 
 STATE = AppState()
 CSV_HEADER = ["time", "source", "channel", "offset_sec", "lon", "lat", "alt", "group", "aircraft", "payload_hex"]
+
+
+def post_reverse_geocode(config, row):
+    url = (config.reverse_geocoder_url or "").strip()
+    if not url:
+        return None
+    payload = {
+        "time": row["time"],
+        "lat": float(row["lat"]),
+        "lon": float(row["lon"]),
+        "alt": row["alt"],
+        "source": "get_heri_gps",
+        "channel": row["channel"],
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=0.8) as res:
+            body = res.read(8192)
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        STATE.mark_geocode_error(str(exc))
+        return None
+    try:
+        geocode = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        STATE.mark_geocode_error(f"invalid geocoder response: {exc}")
+        return None
+    if geocode.get("ok") is False:
+        STATE.mark_geocode_error(str(geocode.get("error", "reverse geocoder error")))
+        return None
+    STATE.mark_geocode_success(geocode)
+    return geocode
 
 
 class CsvWriter:
@@ -453,6 +510,9 @@ def worker_main():
                     "aircraft": "" if parsed["aircraft"] is None else parsed["aircraft"],
                     "payload_hex": parsed["payload_hex"],
                 }
+                geocode = post_reverse_geocode(config, row)
+                if geocode:
+                    row["geocode"] = geocode
                 writer.write(row)
                 STATE.add_row(row)
     except Exception as exc:

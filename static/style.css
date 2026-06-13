@@ -112,7 +112,7 @@ label span,
 
 .coord-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1.3fr repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -253,7 +253,7 @@ summary {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   padding: 14px;
 }

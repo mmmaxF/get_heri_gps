@@ -20,6 +20,7 @@ function formConfig() {
     input_command: `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw`,
     test_capture_dir: $("test_capture_dir").value,
     output_csv: $("output_csv").value,
+    reverse_geocoder_url: $("reverse_geocoder_url").value,
   };
 }
 
@@ -60,6 +61,13 @@ function shortSource(source) {
   if (!source) return "";
   const parts = source.split("/");
   return parts.length > 2 ? parts.slice(-2).join("/") : source;
+}
+
+function placeLabel(geocode) {
+  if (!geocode) return "";
+  if (geocode.address_label) return geocode.address_label;
+  const parts = [geocode.prefecture, geocode.city].filter(Boolean);
+  return parts.join("");
 }
 
 function syncCommandPreview() {
@@ -112,7 +120,7 @@ function updateRows(recent) {
   const rows = $("rows");
   rows.innerHTML = "";
   if (!recent || recent.length === 0) {
-    rows.innerHTML = `<tr class="empty-row"><td colspan="5">受信待ち</td></tr>`;
+    rows.innerHTML = `<tr class="empty-row"><td colspan="6">受信待ち</td></tr>`;
     return;
   }
   for (const row of recent) {
@@ -122,6 +130,7 @@ function updateRows(recent) {
       <td>${row.lat || ""}</td>
       <td>${row.lon || ""}</td>
       <td>${row.alt || ""}</td>
+      <td>${placeLabel(row.geocode) || ""}</td>
       <td>${shortSource(row.source)}</td>
     `;
     rows.appendChild(tr);
@@ -138,6 +147,9 @@ function update(payload) {
   $("samples").textContent = payload.total_samples ?? 0;
   $("channel").textContent = `CH${cfg.gps_channel || 2}`;
   $("csvPath").textContent = cfg.output_csv || "";
+  const geocodeOk = payload.geocode_success_count ?? 0;
+  const geocodeErr = payload.geocode_error_count ?? 0;
+  $("geocodeStatus").textContent = geocodeOk > 0 ? `${geocodeOk}件` : geocodeErr > 0 ? "未接続" : "待機中";
 
   for (const [key, val] of Object.entries(cfg)) {
     const el = $(key);
@@ -155,6 +167,7 @@ function update(payload) {
   $("latestLon").textContent = latest?.lon || "-";
   $("latestLat").textContent = latest?.lat || "-";
   $("latestAlt").textContent = latest?.alt ? `${latest.alt} m` : "-";
+  $("latestPlace").textContent = placeLabel(latest?.geocode || payload.latest_geocode) || "-";
 
   updateRows(payload.recent);
 

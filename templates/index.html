@@ -20,6 +20,10 @@
         <div class="latest-main">
           <span class="label">最新位置</span>
           <div class="coord-row">
+            <div class="place-cell">
+              <span>地名</span>
+              <strong id="latestPlace">-</strong>
+            </div>
             <div>
               <span>緯度</span>
               <strong id="latestLat">-</strong>
@@ -90,6 +94,10 @@
               <input id="output_csv" type="text" value="./output/gps_positions.csv">
             </label>
             <label class="wide">
+              <span>逆ジオコーダーURL</span>
+              <input id="reverse_geocoder_url" type="text" value="http://reverse-geocoder:8020/api/position">
+            </label>
+            <label class="wide">
               <span>自動生成された入力コマンド</span>
               <input id="input_command" type="text" value="arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw">
             </label>
@@ -115,6 +123,10 @@
           <span>CSV</span>
           <strong id="csvPath">./output/gps_positions.csv</strong>
         </div>
+        <div>
+          <span>地名変換</span>
+          <strong id="geocodeStatus">未接続</strong>
+        </div>
       </section>
 
       <section class="log">
@@ -129,11 +141,12 @@
                 <th>緯度</th>
                 <th>経度</th>
                 <th>高度</th>
+                <th>地名</th>
                 <th>入力</th>
               </tr>
             </thead>
             <tbody id="rows">
-              <tr class="empty-row"><td colspan="5">受信待ち</td></tr>
+              <tr class="empty-row"><td colspan="6">受信待ち</td></tr>
             </tbody>
           </table>
         </div>
