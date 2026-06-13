@@ -447,6 +447,11 @@ def index():
     return (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
 
 
+@app.get("/telop/display/v", response_class=HTMLResponse)
+def telop_display_v():
+    return (BASE_DIR / "templates" / "telop_display.html").read_text(encoding="utf-8")
+
+
 @app.get("/api/status")
 def status():
     return JSONResponse(STATE.snapshot())
