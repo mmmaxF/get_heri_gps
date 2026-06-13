@@ -59,6 +59,7 @@ CAPTURE_DEVICE_INCLUDE_KEYWORDS = [
     for item in os.environ.get("CAPTURE_DEVICE_INCLUDE_KEYWORDS", "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI").split(",")
     if item.strip()
 ]
+DISPLAY_OUTPUT_INCLUDE_UNKNOWN = os.environ.get("DISPLAY_OUTPUT_INCLUDE_UNKNOWN", "0").lower() in ("1", "true", "yes", "on")
 
 
 def now_jst():
@@ -410,6 +411,37 @@ def list_capture_devices():
     return devices
 
 
+def list_display_outputs():
+    outputs = []
+    drm_root = Path("/sys/class/drm")
+    for connector in sorted(drm_root.glob("card*-*")):
+        name = connector.name
+        if "Unknown" in name and not DISPLAY_OUTPUT_INCLUDE_UNKNOWN:
+            continue
+        status_path = connector / "status"
+        if not status_path.exists():
+            continue
+        try:
+            status = status_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if status != "connected":
+            continue
+        connector_name = name.split("-", 1)[1] if "-" in name else name
+        mode = ""
+        modes_path = connector / "modes"
+        if modes_path.exists():
+            try:
+                mode = modes_path.read_text(encoding="utf-8").splitlines()[0]
+            except (OSError, IndexError):
+                mode = ""
+        label = f"Display {connector_name}"
+        if mode:
+            label += f" ({mode})"
+        outputs.append({"id": f"display:{name}", "label": label, "kind": "display", "connector": name, "mode": mode})
+    return outputs
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
@@ -472,9 +504,16 @@ def telop_status():
 def telop_output_devices():
     try:
         body, _ctype = telop_request("/api/output-devices")
-        return JSONResponse(json.loads(body.decode("utf-8")))
+        payload = json.loads(body.decode("utf-8"))
     except Exception as exc:
-        return JSONResponse({"devices": [{"id": "", "label": "未選択", "kind": "none"}], "error": str(exc)}, status_code=200)
+        payload = {"devices": [{"id": "", "label": "未選択", "kind": "none"}], "error": str(exc)}
+    devices = payload.get("devices") or [{"id": "", "label": "未選択", "kind": "none"}]
+    seen = {item.get("id") for item in devices}
+    for item in list_display_outputs():
+        if item["id"] not in seen:
+            devices.append(item)
+    payload["devices"] = devices
+    return JSONResponse(payload)
 
 
 @app.get("/api/telop/fonts")
