@@ -5,4 +5,6 @@ output/
 reverse_geocoder/data/
 reverse_geocoder/output/
 telop_output/config/*.json
+input/*
+!input/.gitkeep
 .env

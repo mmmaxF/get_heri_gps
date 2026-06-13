@@ -21,6 +21,22 @@ services:
     volumes:
       - "./output:/app/output"
 
+  gps-demodulator:
+    build: .
+    profiles:
+      - tools
+    command:
+      - "python"
+      - "demodulate_gps.py"
+      - "/app/input"
+      - "--channel"
+      - "2"
+      - "--output"
+      - "/app/output/demodulated_gps.csv"
+    volumes:
+      - "./input:/app/input:ro"
+      - "./output:/app/output"
+
   reverse-geocoder:
     build: ./reverse_geocoder
     container_name: reverse_geocoder

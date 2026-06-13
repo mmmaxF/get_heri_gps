@@ -50,6 +50,21 @@ gps_demodulator.py
 python demodulate_gps.py ../audio_capture/20260613_132355 --channel 2 --limit-sec 60 --output output/demodulated_gps.csv
 ```
 
+Docker内で単体復調する場合は、`input/` に `ch2.raw` と `metadata.json` を含むcaptureディレクトリ、または単体RAWを置いて実行します。
+
+```bash
+docker compose run --rm gps-demodulator
+```
+
+任意のパスをマウントして復調する場合:
+
+```bash
+docker compose run --rm \
+  -v /home/ubuntu/app/hericheck/audio_capture/20260613_132355:/captures/20260613_132355:ro \
+  get-heri-gps \
+  python demodulate_gps.py /captures/20260613_132355 --channel 2 --limit-sec 60 --output /app/output/demodulated_gps.csv
+```
+
 ## 起動
 
 ```bash
