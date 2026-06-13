@@ -8,6 +8,8 @@ const labels = {
 
 let isRunning = false;
 const defaultChannelsByDevice = new Map();
+let telopConfig = null;
+let telopDrag = null;
 
 function formConfig() {
   const device = $("input_device").value;
@@ -183,11 +185,197 @@ function connect() {
   ws.onclose = () => setTimeout(connect, 1000);
 }
 
+function setTelopError(message) {
+  $("telopError").textContent = message || "";
+}
+
+async function getJson(url) {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok || data.ok === false) throw new Error(data.error || "request failed");
+  return data;
+}
+
+async function loadTelopDevices() {
+  const data = await getJson("/api/telop/output-devices");
+  for (const id of ["telop_v_output", "telop_key_output"]) {
+    const select = $(id);
+    const current = select.value;
+    select.innerHTML = "";
+    for (const item of data.devices || []) {
+      const opt = document.createElement("option");
+      opt.value = item.id;
+      opt.textContent = item.label;
+      select.appendChild(opt);
+    }
+    if ([...select.options].some((opt) => opt.value === current)) select.value = current;
+  }
+}
+
+function setTelopForm(cfg) {
+  telopConfig = cfg;
+  $("telop_v_output").value = cfg.v_output || "";
+  $("telop_key_output").value = cfg.key_output || "";
+  $("telop_resolution").value = `${cfg.format?.width || 1920}x${cfg.format?.height || 1080}`;
+  $("telop_frame_rate").value = cfg.format?.frame_rate || "59.94i";
+  $("telop_pixel_format").value = cfg.format?.pixel_format || "yuv8";
+  $("telop_key_mode").value = cfg.format?.key_mode || "matte";
+  $("telop_font_size").value = cfg.font_size || 72;
+  $("telop_text_color").value = cfg.text_color || "#ffffff";
+  $("telop_stroke_color").value = cfg.stroke_color || "#000000";
+  $("telop_stroke_width").value = cfg.stroke_width ?? 6;
+  updateTelopBox();
+}
+
+function telopFormConfig() {
+  const [width, height] = $("telop_resolution").value.split("x").map(Number);
+  const box = telopConfig?.box || { x: 120, y: 820, width: 900, height: 120, scale: 1 };
+  return {
+    v_output: $("telop_v_output").value,
+    key_output: $("telop_key_output").value,
+    format: {
+      width,
+      height,
+      frame_rate: $("telop_frame_rate").value,
+      pixel_format: $("telop_pixel_format").value,
+      key_mode: $("telop_key_mode").value,
+      safe_area: true,
+    },
+    font_size: Number($("telop_font_size").value),
+    text_color: $("telop_text_color").value,
+    stroke_color: $("telop_stroke_color").value,
+    stroke_width: Number($("telop_stroke_width").value),
+    box,
+  };
+}
+
+async function loadTelopConfig() {
+  const cfg = await getJson("/api/telop/config");
+  setTelopForm(cfg);
+}
+
+async function applyTelopConfig() {
+  setTelopError("");
+  const cfg = telopFormConfig();
+  const res = await postJson("/api/telop/config", cfg);
+  setTelopForm(res.config || cfg);
+  refreshTelopPreview();
+}
+
+function refreshTelopPreview() {
+  const stamp = Date.now();
+  $("telopPreviewV").src = `/api/telop/preview/v.png?t=${stamp}`;
+  $("telopPreviewKey").src = `/api/telop/preview/key.png?t=${stamp}`;
+  updateTelopBox();
+}
+
+function stageScale() {
+  const cfg = telopConfig || telopFormConfig();
+  const rect = $("telopStage").getBoundingClientRect();
+  return {
+    sx: rect.width / (cfg.format?.width || 1920),
+    sy: rect.height / (cfg.format?.height || 1080),
+  };
+}
+
+function updateTelopBox() {
+  if (!telopConfig) return;
+  const box = telopConfig.box || {};
+  const { sx, sy } = stageScale();
+  const el = $("telopBox");
+  el.style.left = `${(box.x || 0) * sx}px`;
+  el.style.top = `${(box.y || 0) * sy}px`;
+  el.style.width = `${(box.width || 100) * sx}px`;
+  el.style.height = `${(box.height || 50) * sy}px`;
+}
+
+function startTelopDrag(event) {
+  if (!telopConfig) return;
+  event.preventDefault();
+  const rect = $("telopBox").getBoundingClientRect();
+  const resize = event.clientX > rect.right - 18 && event.clientY > rect.bottom - 18;
+  telopDrag = {
+    resize,
+    startX: event.clientX,
+    startY: event.clientY,
+    box: { ...telopConfig.box },
+  };
+  window.addEventListener("mousemove", moveTelopDrag);
+  window.addEventListener("mouseup", stopTelopDrag);
+}
+
+function moveTelopDrag(event) {
+  if (!telopDrag || !telopConfig) return;
+  const { sx, sy } = stageScale();
+  const dx = (event.clientX - telopDrag.startX) / sx;
+  const dy = (event.clientY - telopDrag.startY) / sy;
+  const fmt = telopConfig.format || { width: 1920, height: 1080 };
+  const next = { ...telopDrag.box };
+  if (telopDrag.resize) {
+    next.width = Math.max(80, Math.min(fmt.width - next.x, telopDrag.box.width + dx));
+    next.height = Math.max(40, Math.min(fmt.height - next.y, telopDrag.box.height + dy));
+  } else {
+    next.x = Math.max(0, Math.min(fmt.width - next.width, telopDrag.box.x + dx));
+    next.y = Math.max(0, Math.min(fmt.height - next.height, telopDrag.box.y + dy));
+  }
+  telopConfig.box = next;
+  updateTelopBox();
+}
+
+async function stopTelopDrag() {
+  if (!telopDrag) return;
+  telopDrag = null;
+  window.removeEventListener("mousemove", moveTelopDrag);
+  window.removeEventListener("mouseup", stopTelopDrag);
+  await applyTelopConfig().catch((e) => setTelopError(e.message));
+}
+
+async function refreshTelopStatus() {
+  try {
+    const st = await getJson("/api/telop/status");
+    $("telopStatus").textContent = st.running ? `出力中: ${st.latest_text || "-"}` : `停止中: ${st.latest_text || "-"}`;
+  } catch (e) {
+    $("telopStatus").textContent = "未接続";
+  }
+}
+
 $("saveBtn").addEventListener("click", () => applyConfig().catch((e) => setError(e.message)));
 $("startBtn").addEventListener("click", () => start().catch((e) => setError(e.message)));
 $("stopBtn").addEventListener("click", () => stop().catch((e) => setError(e.message)));
 $("input_device").addEventListener("change", applyDeviceDefaultChannels);
 $("input_channels").addEventListener("input", syncCommandPreview);
+$("telopApplyBtn").addEventListener("click", () => applyTelopConfig().catch((e) => setTelopError(e.message)));
+$("telopStartBtn").addEventListener("click", async () => {
+  try {
+    await applyTelopConfig();
+    await postJson("/api/telop/start");
+    await refreshTelopStatus();
+  } catch (e) {
+    setTelopError(e.message);
+  }
+});
+$("telopStopBtn").addEventListener("click", async () => {
+  try {
+    await postJson("/api/telop/stop");
+    await refreshTelopStatus();
+  } catch (e) {
+    setTelopError(e.message);
+  }
+});
+for (const id of ["telop_resolution", "telop_frame_rate", "telop_pixel_format", "telop_key_mode", "telop_font_size", "telop_text_color", "telop_stroke_color", "telop_stroke_width"]) {
+  $(id).addEventListener("change", () => applyTelopConfig().catch((e) => setTelopError(e.message)));
+}
+$("telopBox").addEventListener("mousedown", startTelopDrag);
+window.addEventListener("resize", updateTelopBox);
 
 loadDevices();
+loadTelopDevices()
+  .then(loadTelopConfig)
+  .then(refreshTelopPreview)
+  .then(refreshTelopStatus)
+  .catch((e) => setTelopError(e.message));
+setInterval(() => {
+  refreshTelopPreview();
+  refreshTelopStatus();
+}, 5000);
 connect();

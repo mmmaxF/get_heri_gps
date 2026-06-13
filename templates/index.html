@@ -129,6 +129,98 @@
         </div>
       </section>
 
+      <section class="telop">
+        <div class="section-head">
+          <h2>テロップ出力</h2>
+          <span id="telopError"></span>
+        </div>
+
+        <div class="telop-grid">
+          <label>
+            <span>V出力</span>
+            <select id="telop_v_output"></select>
+          </label>
+          <label>
+            <span>Key出力</span>
+            <select id="telop_key_output"></select>
+          </label>
+          <label>
+            <span>解像度</span>
+            <select id="telop_resolution">
+              <option value="1920x1080">1920x1080</option>
+              <option value="1280x720">1280x720</option>
+            </select>
+          </label>
+          <label>
+            <span>フレームレート</span>
+            <select id="telop_frame_rate">
+              <option value="59.94i">59.94i</option>
+              <option value="59.94p">59.94p</option>
+              <option value="29.97p">29.97p</option>
+              <option value="50i">50i</option>
+              <option value="50p">50p</option>
+              <option value="25p">25p</option>
+            </select>
+          </label>
+          <label>
+            <span>ピクセル形式</span>
+            <select id="telop_pixel_format">
+              <option value="yuv8">8bit YUV</option>
+              <option value="yuv10">10bit YUV</option>
+              <option value="bgra">BGRA</option>
+              <option value="rgba">RGBA</option>
+            </select>
+          </label>
+          <label>
+            <span>Key形式</span>
+            <select id="telop_key_mode">
+              <option value="matte">白黒マット</option>
+              <option value="luma">ルミナンスKey</option>
+              <option value="alpha">アルファKey</option>
+            </select>
+          </label>
+          <label>
+            <span>フォントサイズ</span>
+            <input id="telop_font_size" type="number" min="12" max="240" value="72">
+          </label>
+          <label>
+            <span>文字色</span>
+            <input id="telop_text_color" type="color" value="#ffffff">
+          </label>
+          <label>
+            <span>縁取り色</span>
+            <input id="telop_stroke_color" type="color" value="#000000">
+          </label>
+          <label>
+            <span>縁取り幅</span>
+            <input id="telop_stroke_width" type="number" min="0" max="30" value="6">
+          </label>
+        </div>
+
+        <div class="telop-actions">
+          <button id="telopApplyBtn" type="button">テロップ設定を反映</button>
+          <button id="telopStartBtn" type="button" class="primary">テロップ開始</button>
+          <button id="telopStopBtn" type="button">テロップ停止</button>
+          <span id="telopStatus">待機中</span>
+        </div>
+
+        <div class="preview-grid">
+          <div>
+            <div class="preview-title">Vプレビュー</div>
+            <div class="preview-stage" id="telopStage">
+              <img id="telopPreviewV" alt="V preview">
+              <div id="telopBox"></div>
+            </div>
+          </div>
+          <div>
+            <div class="preview-title">Keyプレビュー</div>
+            <div class="preview-stage">
+              <img id="telopPreviewKey" alt="Key preview">
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="log">
         <div class="section-head">
           <h2>受信履歴</h2>

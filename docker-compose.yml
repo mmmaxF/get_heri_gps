@@ -38,3 +38,18 @@ services:
     volumes:
       - "./reverse_geocoder/data:/app/data"
       - "./reverse_geocoder/output:/app/output"
+
+  telop-output:
+    build: ./telop_output
+    container_name: telop_output
+    restart: unless-stopped
+    ports:
+      - "8030:8030"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8030"
+      REVERSE_GEOCODER_LATEST_URL: "http://reverse-geocoder:8020/api/latest"
+      TELOP_CONFIG_PATH: "/app/config/telop_config.json"
+    volumes:
+      - "./telop_output/config:/app/config"
+      - "./telop_output/assets:/app/assets"

@@ -5,4 +5,5 @@ __pycache__/
 output/
 reverse_geocoder/data/
 reverse_geocoder/output/
+telop_output/config/*.json
 .env
