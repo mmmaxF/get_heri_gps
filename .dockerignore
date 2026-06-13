@@ -3,4 +3,6 @@
 __pycache__/
 *.py[cod]
 output/
+reverse_geocoder/data/
+reverse_geocoder/output/
 .env

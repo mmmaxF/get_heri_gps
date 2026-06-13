@@ -2,4 +2,6 @@ __pycache__/
 *.py[cod]
 .venv/
 output/
+reverse_geocoder/data/
+reverse_geocoder/output/
 .env

@@ -30,6 +30,7 @@ echo "ローカル: ${APP_URL}"
 if [ -n "${LAN_IP}" ]; then
   echo "LAN:      http://${LAN_IP}:8010"
 fi
+echo "逆ジオコーダーAPI: http://127.0.0.1:8020/api/health"
 echo
 echo "ログ確認: docker compose logs -f"
 echo "停止:     docker compose down"

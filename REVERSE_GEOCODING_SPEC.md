@@ -61,7 +61,7 @@ services:
     ports:
       - "8020:8020"
     volumes:
-      - "./reverse_geocoder/data:/app/data:ro"
+      - "./reverse_geocoder/data:/app/data"
       - "./reverse_geocoder/output:/app/output"
 ```
 
@@ -349,3 +349,19 @@ POST失敗時もGPS処理を止めない
 ```
 
 reverse_geocoderコンテナが未実装/未起動の場合、地名欄は空のままですが、GPS取得には影響しません。
+
+## 13. 実装メモ
+
+実装では、国土数値情報 N03 の近畿地方版をデフォルト取得対象にします。
+
+```text
+https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026/N03-20260101_56_GML.zip
+```
+
+取得対象を変えたい場合は、`docker-compose.yml` の `GEOCODER_DATA_URL` を変更します。
+
+例:
+
+```text
+全国版、都道府県版、地方版のN03 zip URL
+```

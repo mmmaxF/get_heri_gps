@@ -96,6 +96,30 @@ docker compose exec get-heri-gps arecord -l
 
 AJAが `hw:2,0` 以外で見える場合は、`docker-compose.yml` の `INPUT_DEVICE` を変更してください。
 
+## 逆ジオコーディング
+
+`reverse-geocoder` コンテナは、`get_heri_gps` からPOSTされた緯度・経度を都道府県・市区町村に変換します。
+
+デフォルトでは、起動時に国土数値情報 N03 行政区域データの近畿地方版を取得し、SQLite DBを作成します。
+
+```text
+reverse_geocoder/data/admin_area.sqlite
+```
+
+変換結果CSV:
+
+```text
+reverse_geocoder/output/geocoded_positions.csv
+```
+
+API確認:
+
+```bash
+curl http://127.0.0.1:8020/api/health
+```
+
+地名データの取得URLを変更する場合は、`docker-compose.yml` の `GEOCODER_DATA_URL` を変更してください。
+
 ## 実SDI入力
 
 実SDI入力では、UIの `入力デバイス` プルダウンからAJAなどの録音デバイスを選びます。

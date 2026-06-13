@@ -20,3 +20,21 @@ services:
       - "audio"
     volumes:
       - "./output:/app/output"
+
+  reverse-geocoder:
+    build: ./reverse_geocoder
+    container_name: reverse_geocoder
+    restart: unless-stopped
+    ports:
+      - "8020:8020"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8020"
+      GEOCODER_AUTO_UPDATE: "1"
+      GEOCODER_UPDATE_DAYS: "30"
+      GEOCODER_DATA_URL: "https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026/N03-20260101_56_GML.zip"
+      GEOCODER_DB_PATH: "/app/data/admin_area.sqlite"
+      GEOCODER_OUTPUT_CSV: "/app/output/geocoded_positions.csv"
+    volumes:
+      - "./reverse_geocoder/data:/app/data"
+      - "./reverse_geocoder/output:/app/output"
