@@ -210,6 +210,12 @@ output/gps_positions.csv
 time,source,channel,offset_sec,lon,lat,alt,group,aircraft,payload_hex
 ```
 
+`time` は日本時間の以下の形式で出力します。
+
+```text
+2026/06/14 02:46:56
+```
+
 ## API
 
 ```text

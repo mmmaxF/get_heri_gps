@@ -58,6 +58,12 @@ def now_jst():
     return datetime.now(JST)
 
 
+def format_japanese_time(dt):
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(JST)
+    return dt.strftime("%Y/%m/%d %H:%M:%S")
+
+
 def bcd_byte(b):
     hi = (b >> 4) & 0xF
     lo = b & 0xF
@@ -512,7 +518,8 @@ def worker_main():
                 seen.add(key)
                 t = source_start + timedelta(seconds=offset_sec)
                 row = {
-                    "time": t.isoformat(),
+                    "time": format_japanese_time(t),
+                    "time_iso": t.isoformat(),
                     "source": source_name,
                     "channel": config.gps_channel,
                     "offset_sec": f"{offset_sec:.6f}",
