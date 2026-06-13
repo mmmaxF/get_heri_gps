@@ -19,7 +19,7 @@ function formConfig() {
     gps_channel: Number($("gps_channel").value),
     input_channels: channels,
     input_device: device,
-    input_command: `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw`,
+    input_command: device ? `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw` : "",
     test_capture_dir: $("test_capture_dir").value,
     output_csv: $("output_csv").value,
     reverse_geocoder_url: $("reverse_geocoder_url").value,
@@ -50,6 +50,10 @@ async function applyConfig() {
 }
 
 async function start() {
+  if (!$("input_device").value) {
+    setError("入力デバイスを接続してから開始してください");
+    return;
+  }
   if (!isRunning) await applyConfig();
   await postJson("/api/start");
 }
@@ -75,7 +79,7 @@ function placeLabel(geocode) {
 function syncCommandPreview() {
   const device = $("input_device").value;
   const channels = Number($("input_channels").value);
-  $("input_command").value = `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw`;
+  $("input_command").value = device ? `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw` : "";
 }
 
 function applyDeviceDefaultChannels() {
@@ -93,7 +97,19 @@ async function loadDevices() {
     const current = select.value;
     select.innerHTML = "";
     defaultChannelsByDevice.clear();
-    for (const item of data.devices || []) {
+    const devices = data.devices || [];
+    if (devices.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "認識された入力デバイスなし";
+      select.appendChild(opt);
+      select.value = "";
+      syncCommandPreview();
+      setError("入力デバイスが認識されていません");
+      return;
+    }
+    setError("");
+    for (const item of devices) {
       const opt = document.createElement("option");
       opt.value = item.device;
       opt.textContent = item.label;

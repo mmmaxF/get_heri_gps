@@ -54,6 +54,11 @@ DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positio
 DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 DEFAULT_TELOP_OUTPUT_URL = os.environ.get("TELOP_OUTPUT_URL", "http://telop-output:8030")
+CAPTURE_DEVICE_INCLUDE_KEYWORDS = [
+    item.strip().lower()
+    for item in os.environ.get("CAPTURE_DEVICE_INCLUDE_KEYWORDS", "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI").split(",")
+    if item.strip()
+]
 
 
 def now_jst():
@@ -389,6 +394,8 @@ def list_capture_devices():
         proc = subprocess.run(["arecord", "-l"], text=True, capture_output=True, timeout=3)
     except Exception:
         return devices
+    if proc.returncode != 0:
+        return devices
     pat = re.compile(r"card (\d+): ([^\[]+) \[([^\]]+)\], device (\d+): ([^\[]+) \[([^\]]+)\]")
     for line in proc.stdout.splitlines():
         m = pat.search(line)
@@ -397,9 +404,9 @@ def list_capture_devices():
         card, card_id, card_name, dev, dev_id, dev_name = m.groups()
         hw = f"hw:{card},{dev}"
         label = f"{card_name} / {dev_name} ({hw})"
+        if CAPTURE_DEVICE_INCLUDE_KEYWORDS and not any(keyword in label.lower() for keyword in CAPTURE_DEVICE_INCLUDE_KEYWORDS):
+            continue
         devices.append({"device": hw, "label": label, "card": int(card), "subdevice": int(dev), "default_channels": 2})
-    if not devices:
-        devices.append({"device": DEFAULT_INPUT_DEVICE, "label": f"{DEFAULT_INPUT_DEVICE}", "card": None, "subdevice": None, "default_channels": 2})
     return devices
 
 

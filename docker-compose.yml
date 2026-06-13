@@ -12,6 +12,7 @@ services:
       INPUT_DEVICE: "hw:2,0"
       INPUT_CHANNELS: "2"
       GPS_CHANNEL: "2"
+      CAPTURE_DEVICE_INCLUDE_KEYWORDS: "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI"
       OUTPUT_CSV: "/app/output/gps_positions.csv"
       REVERSE_GEOCODER_URL: "http://reverse-geocoder:8020/api/position"
     devices:

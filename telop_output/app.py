@@ -299,6 +299,8 @@ def png_response(img):
 def output_devices():
     devices = [{"id": "", "label": "未選択", "kind": "none"}]
     for path in sorted(Path("/dev").glob("video*")):
+        if not path.exists() or not os.access(path, os.W_OK):
+            continue
         devices.append({"id": f"v4l2:{path}", "label": f"v4l2 {path}", "kind": "v4l2"})
     return devices
 
