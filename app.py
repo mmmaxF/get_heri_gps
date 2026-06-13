@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 import os
+import re
 import shlex
 import subprocess
 import threading
@@ -46,6 +47,7 @@ SAMPLE_RATE = env_int("SAMPLE_RATE", 48000)
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = env_int("PORT", 8010)
 DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positions.csv"))
+DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 
 
 def now_jst():
@@ -227,6 +229,7 @@ class RuntimeConfig:
     mode: str = "command"
     gps_channel: int = env_int("GPS_CHANNEL", 2)
     input_channels: int = env_int("INPUT_CHANNELS", 2)
+    input_device: str = DEFAULT_INPUT_DEVICE
     input_command: str = os.environ.get("INPUT_COMMAND", "arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw")
     test_capture_dir: str = os.environ.get("TEST_CAPTURE_DIR", "../audio_capture/20260613_132355")
     output_csv: str = str(DEFAULT_OUTPUT_CSV)
@@ -285,6 +288,8 @@ class AppState:
                         if not path.is_absolute():
                             path = BASE_DIR / path
                         val = str(path)
+                    if key == "input_device" and val:
+                        normalized["input_command"] = build_arecord_command(val, int(values.get("input_channels", self.config.input_channels)))
                     normalized[key] = val
             if self.running:
                 changed = [key for key, val in normalized.items() if getattr(self.config, key) != val]
@@ -373,11 +378,12 @@ def iter_test_chunks(config, stop_event):
 
 
 def iter_command_chunks(config, stop_event):
-    if not config.input_command.strip():
+    command = config.input_command.strip() or build_arecord_command(config.input_device, config.input_channels)
+    if not command:
         raise RuntimeError("INPUT_COMMAND is empty")
-    cmd = shlex.split(config.input_command)
+    cmd = shlex.split(command)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    source = config.input_command
+    source = command
     start_time = now_jst()
     chunk_frames = int(SAMPLE_RATE * 0.25)
     bytes_per_chunk = chunk_frames * config.input_channels * 2
@@ -461,6 +467,30 @@ app = FastAPI(title="get_heri_gps")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+def build_arecord_command(device, channels):
+    return f"arecord -D {device} -f S16_LE -r {SAMPLE_RATE} -c {channels} -t raw"
+
+
+def list_capture_devices():
+    devices = []
+    try:
+        proc = subprocess.run(["arecord", "-l"], text=True, capture_output=True, timeout=3)
+    except Exception:
+        return devices
+    pat = re.compile(r"card (\d+): ([^\[]+) \[([^\]]+)\], device (\d+): ([^\[]+) \[([^\]]+)\]")
+    for line in proc.stdout.splitlines():
+        m = pat.search(line)
+        if not m:
+            continue
+        card, card_id, card_name, dev, dev_id, dev_name = m.groups()
+        hw = f"hw:{card},{dev}"
+        label = f"{card_name} / {dev_name} ({hw})"
+        devices.append({"device": hw, "label": label, "card": int(card), "subdevice": int(dev)})
+    if not devices:
+        devices.append({"device": DEFAULT_INPUT_DEVICE, "label": f"{DEFAULT_INPUT_DEVICE}", "card": None, "subdevice": None})
+    return devices
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
@@ -469,6 +499,11 @@ def index():
 @app.get("/api/status")
 def status():
     return JSONResponse(STATE.snapshot())
+
+
+@app.get("/api/devices")
+def devices():
+    return {"devices": list_capture_devices()}
 
 
 @app.post("/api/config")

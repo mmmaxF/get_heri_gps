@@ -9,11 +9,14 @@ const labels = {
 let isRunning = false;
 
 function formConfig() {
+  const device = $("input_device").value;
+  const channels = Number($("input_channels").value);
   return {
     mode: "command",
     gps_channel: Number($("gps_channel").value),
-    input_channels: Number($("input_channels").value),
-    input_command: $("input_command").value,
+    input_channels: channels,
+    input_device: device,
+    input_command: `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw`,
     test_capture_dir: $("test_capture_dir").value,
     output_csv: $("output_csv").value,
   };
@@ -38,6 +41,7 @@ function setError(message) {
 
 async function applyConfig() {
   setError("");
+  syncCommandPreview();
   await postJson("/api/config", formConfig());
 }
 
@@ -55,6 +59,34 @@ function shortSource(source) {
   if (!source) return "";
   const parts = source.split("/");
   return parts.length > 2 ? parts.slice(-2).join("/") : source;
+}
+
+function syncCommandPreview() {
+  const device = $("input_device").value;
+  const channels = Number($("input_channels").value);
+  $("input_command").value = `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw`;
+}
+
+async function loadDevices() {
+  try {
+    const res = await fetch("/api/devices");
+    const data = await res.json();
+    const select = $("input_device");
+    const current = select.value;
+    select.innerHTML = "";
+    for (const item of data.devices || []) {
+      const opt = document.createElement("option");
+      opt.value = item.device;
+      opt.textContent = item.label;
+      select.appendChild(opt);
+    }
+    if ([...select.options].some((opt) => opt.value === current)) {
+      select.value = current;
+    }
+    syncCommandPreview();
+  } catch (e) {
+    setError("録音デバイス一覧を取得できませんでした");
+  }
 }
 
 function setStatus(payload) {
@@ -101,6 +133,11 @@ function update(payload) {
     const el = $(key);
     if (el && document.activeElement !== el) el.value = val;
   }
+  if (cfg.input_device && $("input_device").value !== cfg.input_device) {
+    const hasDevice = [...$("input_device").options].some((opt) => opt.value === cfg.input_device);
+    if (hasDevice) $("input_device").value = cfg.input_device;
+  }
+  if (document.activeElement !== $("input_command")) syncCommandPreview();
   $("mode").value = "command";
 
   const latest = payload.latest;
@@ -126,5 +163,8 @@ function connect() {
 $("saveBtn").addEventListener("click", () => applyConfig().catch((e) => setError(e.message)));
 $("startBtn").addEventListener("click", () => start().catch((e) => setError(e.message)));
 $("stopBtn").addEventListener("click", () => stop().catch((e) => setError(e.message)));
+$("input_device").addEventListener("change", syncCommandPreview);
+$("input_channels").addEventListener("input", syncCommandPreview);
 
+loadDevices();
 connect();

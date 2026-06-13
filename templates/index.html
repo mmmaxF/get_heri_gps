@@ -53,6 +53,12 @@
         </select>
 
         <div class="quick-grid">
+          <label class="device-field">
+            <span>入力デバイス</span>
+            <select id="input_device">
+              <option value="hw:2,0">AJA U-TAP (hw:2,0)</option>
+            </select>
+          </label>
           <label>
             <span>GPS音声チャンネル</span>
             <select id="gps_channel">
@@ -70,10 +76,6 @@
             <span>入力チャンネル数</span>
             <input id="input_channels" type="number" min="1" max="16" value="2">
           </label>
-          <label class="wide">
-            <span>実機入力コマンド</span>
-            <input id="input_command" type="text" value="arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw">
-          </label>
         </div>
 
         <details class="advanced">
@@ -86,6 +88,10 @@
             <label class="wide">
               <span>CSV保存先</span>
               <input id="output_csv" type="text" value="./output/gps_positions.csv">
+            </label>
+            <label class="wide">
+              <span>自動生成された入力コマンド</span>
+              <input id="input_command" type="text" value="arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw">
             </label>
             <button id="saveBtn" type="button">設定を反映</button>
           </div>
