@@ -44,6 +44,7 @@ DEFAULT_CONFIG = {
     "stroke_width": 6,
     "background_color": "#000000",
     "background_opacity": 0.35,
+    "key_background_opacity": 0.35,
     "padding": 24,
     "box": {
         "x": 120,
@@ -118,14 +119,17 @@ def hex_to_rgba(value, alpha=1.0):
 
 
 def available_fonts():
-    candidates = [
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    font_roots = [
+        Path("/app/assets/fonts"),
+        Path("/usr/share/fonts/opentype/noto"),
+        Path("/usr/share/fonts/truetype/dejavu"),
     ]
     fonts = []
     seen = set()
-    for path in sorted(Path("/app/assets/fonts").glob("*")) + [Path(c) for c in candidates]:
+    paths = []
+    for root in font_roots:
+        paths.extend(sorted(root.rglob("*")))
+    for path in paths:
         if not path.is_file() or path.suffix.lower() not in (".ttf", ".otf", ".ttc"):
             continue
         key = str(path)
@@ -203,7 +207,7 @@ def fit_font(draw, text, font_path, max_width, max_height, target_size):
     return ImageFont.load_default()
 
 
-def render_rgba(config):
+def render_rgba(config, key_background_opacity=None):
     fmt = config.get("format", {})
     width = int(fmt.get("width", 1920))
     height = int(fmt.get("height", 1080))
@@ -225,7 +229,8 @@ def render_rgba(config):
     scale = float(box.get("scale", 1.0))
     font_size = int(float(config.get("font_size", 72)) * scale)
 
-    bg = hex_to_rgba(config.get("background_color", "#000000"), config.get("background_opacity", 0.35))
+    bg_opacity = config.get("background_opacity", 0.35) if key_background_opacity is None else key_background_opacity
+    bg = hex_to_rgba(config.get("background_color", "#000000"), bg_opacity)
     if bg[3] > 0:
         draw.rounded_rectangle((x, y, x + bw, y + bh), radius=8, fill=bg)
 
@@ -323,7 +328,9 @@ def preview_v():
 
 @app.get("/api/preview/key.png")
 def preview_key():
-    img = render_rgba(STATE.snapshot()["config"])
+    config = STATE.snapshot()["config"]
+    key_opacity = config.get("key_background_opacity", config.get("background_opacity", 0.35))
+    img = render_rgba(config, key_background_opacity=key_opacity)
     alpha = img.getchannel("A")
     return png_response(Image.merge("RGB", (alpha, alpha, alpha)))
 
