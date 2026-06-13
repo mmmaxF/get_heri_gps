@@ -40,6 +40,53 @@ python app.py
 http://127.0.0.1:8010
 ```
 
+## Dockerで起動
+
+Docker環境では、AJAなどのALSA録音デバイスをコンテナへ渡すために `/dev/snd` をマウントします。
+
+```bash
+cd /home/ubuntu/app/hericheck/get_heri_gps
+docker compose up --build
+```
+
+バックグラウンドで起動する場合:
+
+```bash
+docker compose up -d --build
+```
+
+ブラウザ:
+
+```text
+http://127.0.0.1:8010
+```
+
+別PCから見る場合:
+
+```text
+http://<UbuntuのIP>:8010
+```
+
+停止:
+
+```bash
+docker compose down
+```
+
+CSVはホスト側の以下に保存されます。
+
+```text
+./output/gps_positions.csv
+```
+
+コンテナ内で録音デバイスを確認する場合:
+
+```bash
+docker compose exec get-heri-gps arecord -l
+```
+
+AJAが `hw:2,0` 以外で見える場合は、`docker-compose.yml` の `INPUT_DEVICE` を変更してください。
+
 ## 実SDI入力
 
 実SDI入力では、UIの `入力デバイス` プルダウンからAJAなどの録音デバイスを選びます。

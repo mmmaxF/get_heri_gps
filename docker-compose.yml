@@ -1,0 +1,21 @@
+services:
+  get-heri-gps:
+    build: .
+    container_name: get_heri_gps
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8010"
+      SAMPLE_RATE: "48000"
+      INPUT_DEVICE: "hw:2,0"
+      INPUT_CHANNELS: "2"
+      GPS_CHANNEL: "2"
+      OUTPUT_CSV: "/app/output/gps_positions.csv"
+    devices:
+      - "/dev/snd:/dev/snd"
+    group_add:
+      - "audio"
+    volumes:
+      - "./output:/app/output"
