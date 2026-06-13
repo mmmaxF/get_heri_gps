@@ -631,6 +631,15 @@ def telop_output_devices():
         return JSONResponse({"devices": [{"id": "", "label": "未選択", "kind": "none"}], "error": str(exc)}, status_code=200)
 
 
+@app.get("/api/telop/fonts")
+def telop_fonts():
+    try:
+        body, _ctype = telop_request("/api/fonts")
+        return JSONResponse(json.loads(body.decode("utf-8")))
+    except Exception as exc:
+        return JSONResponse({"fonts": [], "error": str(exc)}, status_code=200)
+
+
 @app.get("/api/telop/config")
 def telop_config():
     try:

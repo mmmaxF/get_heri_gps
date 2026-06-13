@@ -403,11 +403,17 @@ Docker内部名をブラウザに見せない
 
 利用可能な出力インターフェース一覧を返します。
 
-### 10.3 GET /api/config
+### 10.3 GET /api/fonts
+
+利用可能なフォント一覧を返します。
+
+`telop_output/assets/fonts/` に追加した `.ttf` / `.otf` / `.ttc` と、コンテナ内の標準フォントを一覧化します。
+
+### 10.4 GET /api/config
 
 現在のテロップ設定を返します。
 
-### 10.4 POST /api/config
+### 10.5 POST /api/config
 
 テロップ設定を更新します。
 
@@ -428,6 +434,7 @@ Docker内部名をブラウザに見せない
   "font_family": "Noto Sans CJK JP",
   "font_size": 72,
   "font_weight": 700,
+  "text_align": "center",
   "text_color": "#ffffff",
   "stroke_color": "#000000",
   "stroke_width": 6,
@@ -441,11 +448,13 @@ Docker内部名をブラウザに見せない
 }
 ```
 
-### 10.5 POST /api/start
+`text_align` は `left` / `center` / `right` を指定します。
+
+### 10.6 POST /api/start
 
 V/Key出力を開始します。
 
-### 10.6 POST /api/stop
+### 10.7 POST /api/stop
 
 V/Key出力を停止します。
 

@@ -212,6 +212,20 @@ async function loadTelopDevices() {
   }
 }
 
+async function loadTelopFonts() {
+  const data = await getJson("/api/telop/fonts");
+  const select = $("telop_font_family");
+  const current = select.value;
+  select.innerHTML = "";
+  for (const item of data.fonts || []) {
+    const opt = document.createElement("option");
+    opt.value = item.id;
+    opt.textContent = item.source === "custom" ? `${item.label} / 追加` : item.label;
+    select.appendChild(opt);
+  }
+  if ([...select.options].some((opt) => opt.value === current)) select.value = current;
+}
+
 function setTelopForm(cfg) {
   telopConfig = cfg;
   $("telop_v_output").value = cfg.v_output || "";
@@ -220,6 +234,10 @@ function setTelopForm(cfg) {
   $("telop_frame_rate").value = cfg.format?.frame_rate || "59.94i";
   $("telop_pixel_format").value = cfg.format?.pixel_format || "yuv8";
   $("telop_key_mode").value = cfg.format?.key_mode || "matte";
+  if ([...$("telop_font_family").options].some((opt) => opt.value === cfg.font_family)) {
+    $("telop_font_family").value = cfg.font_family;
+  }
+  $("telop_text_align").value = cfg.text_align || "center";
   $("telop_font_size").value = cfg.font_size || 72;
   $("telop_text_color").value = cfg.text_color || "#ffffff";
   $("telop_stroke_color").value = cfg.stroke_color || "#000000";
@@ -241,6 +259,8 @@ function telopFormConfig() {
       key_mode: $("telop_key_mode").value,
       safe_area: true,
     },
+    font_family: $("telop_font_family").value,
+    text_align: $("telop_text_align").value,
     font_size: Number($("telop_font_size").value),
     text_color: $("telop_text_color").value,
     stroke_color: $("telop_stroke_color").value,
@@ -362,7 +382,7 @@ $("telopStopBtn").addEventListener("click", async () => {
     setTelopError(e.message);
   }
 });
-for (const id of ["telop_resolution", "telop_frame_rate", "telop_pixel_format", "telop_key_mode", "telop_font_size", "telop_text_color", "telop_stroke_color", "telop_stroke_width"]) {
+for (const id of ["telop_resolution", "telop_frame_rate", "telop_pixel_format", "telop_key_mode", "telop_font_family", "telop_text_align", "telop_font_size", "telop_text_color", "telop_stroke_color", "telop_stroke_width"]) {
   $(id).addEventListener("change", () => applyTelopConfig().catch((e) => setTelopError(e.message)));
 }
 $("telopBox").addEventListener("mousedown", startTelopDrag);
@@ -370,6 +390,7 @@ window.addEventListener("resize", updateTelopBox);
 
 loadDevices();
 loadTelopDevices()
+  .then(loadTelopFonts)
   .then(loadTelopConfig)
   .then(refreshTelopPreview)
   .then(refreshTelopStatus)

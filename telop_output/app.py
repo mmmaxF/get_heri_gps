@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     "font_family": "Noto Sans CJK JP",
     "font_size": 72,
     "font_weight": 700,
+    "text_align": "center",
     "text_color": "#ffffff",
     "stroke_color": "#000000",
     "stroke_width": 6,
@@ -116,20 +117,52 @@ def hex_to_rgba(value, alpha=1.0):
     return (r, g, b, max(0, min(255, int(float(alpha) * 255))))
 
 
-def find_font(font_family):
+def available_fonts():
     candidates = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
-    asset_fonts = sorted(Path("/app/assets/fonts").glob("*"))
-    for path in list(asset_fonts) + [Path(c) for c in candidates]:
-        if path.is_file() and (not font_family or font_family.lower().split()[0] in path.name.lower() or "noto" in path.name.lower()):
-            return str(path)
-    for c in candidates:
-        if Path(c).is_file():
-            return c
+    fonts = []
+    seen = set()
+    for path in sorted(Path("/app/assets/fonts").glob("*")) + [Path(c) for c in candidates]:
+        if not path.is_file() or path.suffix.lower() not in (".ttf", ".otf", ".ttc"):
+            continue
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        source = "custom" if str(path).startswith("/app/assets/fonts/") else "system"
+        fonts.append({"id": key, "label": path.stem, "source": source})
+    return fonts
+
+
+def find_font(font_family):
+    fonts = available_fonts()
+    if font_family:
+        requested = str(font_family)
+        requested_path = Path(requested)
+        if requested_path.is_file():
+            return str(requested_path)
+        for item in fonts:
+            if item["id"] == requested or item["label"] == requested:
+                return item["id"]
+        for item in fonts:
+            if requested.lower().split()[0] in item["label"].lower():
+                return item["id"]
+    for item in fonts:
+        if "noto" in item["label"].lower():
+            return item["id"]
+    for item in fonts:
+        return item["id"]
     return None
+
+
+def font_label(font_id):
+    for item in available_fonts():
+        if item["id"] == font_id:
+            return item["label"]
+    return font_id or ""
 
 
 def get_latest_geocode():
@@ -204,7 +237,12 @@ def render_rgba(config):
     th = bbox[3] - bbox[1]
     tx = x + padding
     ty = y + max(0, (bh - th) // 2) - bbox[1]
-    if tw < bw - padding * 2:
+    text_align = str(config.get("text_align", "center")).lower()
+    if text_align == "left":
+        tx = x + padding - bbox[0]
+    elif text_align == "right":
+        tx = x + bw - padding - tw - bbox[0]
+    elif tw < bw - padding * 2:
         tx = x + (bw - tw) // 2 - bbox[0]
 
     draw.text(
@@ -215,11 +253,6 @@ def render_rgba(config):
         stroke_width=stroke_width,
         stroke_fill=hex_to_rgba(config.get("stroke_color", "#000000"), 1.0),
     )
-
-    if fmt.get("safe_area"):
-        margin_x = int(width * 0.05)
-        margin_y = int(height * 0.05)
-        draw.rectangle((margin_x, margin_y, width - margin_x, height - margin_y), outline=(255, 255, 255, 80), width=2)
 
     return img
 
@@ -245,6 +278,12 @@ def status():
 @app.get("/api/output-devices")
 def get_output_devices():
     return {"devices": output_devices()}
+
+
+@app.get("/api/fonts")
+def get_fonts():
+    fonts = available_fonts()
+    return {"fonts": fonts, "current": font_label(find_font(STATE.snapshot()["config"].get("font_family")))}
 
 
 @app.get("/api/config")
