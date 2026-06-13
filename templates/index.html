@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ヘリGPS取得</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">SDI AUDIO GPS</p>
+          <h1>ヘリGPS取得</h1>
+        </div>
+        <div class="run-pill" id="runStatus">停止中</div>
+      </header>
+
+      <section class="hero">
+        <div class="latest-main">
+          <span class="label">最新位置</span>
+          <div class="coord-row">
+            <div>
+              <span>緯度</span>
+              <strong id="latestLat">-</strong>
+            </div>
+            <div>
+              <span>経度</span>
+              <strong id="latestLon">-</strong>
+            </div>
+            <div>
+              <span>高度</span>
+              <strong id="latestAlt">-</strong>
+            </div>
+          </div>
+          <div class="latest-time" id="latestTime">まだ受信していません</div>
+        </div>
+        <div class="actions">
+          <button id="startBtn" class="primary">開始</button>
+          <button id="stopBtn">停止</button>
+          <a class="button" href="/api/download">CSVを開く</a>
+        </div>
+      </section>
+
+      <section class="setup">
+        <div class="section-head">
+          <h2>入力設定</h2>
+          <span id="errorText"></span>
+        </div>
+
+        <select id="mode" class="hidden-select">
+          <option value="command" selected>command</option>
+        </select>
+
+        <div class="quick-grid">
+          <label>
+            <span>GPS音声チャンネル</span>
+            <select id="gps_channel">
+              <option value="1">CH1</option>
+              <option value="2" selected>CH2</option>
+              <option value="3">CH3</option>
+              <option value="4">CH4</option>
+              <option value="5">CH5</option>
+              <option value="6">CH6</option>
+              <option value="7">CH7</option>
+              <option value="8">CH8</option>
+            </select>
+          </label>
+          <label>
+            <span>入力チャンネル数</span>
+            <input id="input_channels" type="number" min="1" max="16" value="2">
+          </label>
+          <label class="wide">
+            <span>実機入力コマンド</span>
+            <input id="input_command" type="text" value="arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw">
+          </label>
+        </div>
+
+        <details class="advanced">
+          <summary>詳細設定</summary>
+          <div class="advanced-grid">
+            <label class="wide">
+              <span>テスト用RAWディレクトリ</span>
+              <input id="test_capture_dir" type="text" value="../audio_capture/20260613_132355">
+            </label>
+            <label class="wide">
+              <span>CSV保存先</span>
+              <input id="output_csv" type="text" value="./output/gps_positions.csv">
+            </label>
+            <button id="saveBtn" type="button">設定を反映</button>
+          </div>
+        </details>
+      </section>
+
+      <section class="metrics">
+        <div>
+          <span>取得件数</span>
+          <strong id="decoded">0</strong>
+        </div>
+        <div>
+          <span>選択CH</span>
+          <strong id="channel">CH2</strong>
+        </div>
+        <div>
+          <span>入力サンプル</span>
+          <strong id="samples">0</strong>
+        </div>
+        <div>
+          <span>CSV</span>
+          <strong id="csvPath">./output/gps_positions.csv</strong>
+        </div>
+      </section>
+
+      <section class="log">
+        <div class="section-head">
+          <h2>受信履歴</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>時刻</th>
+                <th>緯度</th>
+                <th>経度</th>
+                <th>高度</th>
+                <th>入力</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr class="empty-row"><td colspan="5">受信待ち</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

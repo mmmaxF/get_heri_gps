@@ -1,0 +1,130 @@
+const $ = (id) => document.getElementById(id);
+
+const labels = {
+  running: "取得中",
+  stopped: "停止中",
+  error: "エラー",
+};
+
+let isRunning = false;
+
+function formConfig() {
+  return {
+    mode: "command",
+    gps_channel: Number($("gps_channel").value),
+    input_channels: Number($("input_channels").value),
+    input_command: $("input_command").value,
+    test_capture_dir: $("test_capture_dir").value,
+    output_csv: $("output_csv").value,
+  };
+}
+
+async function postJson(url, body = {}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error || "request failed");
+  }
+  return data;
+}
+
+function setError(message) {
+  $("errorText").textContent = message || "";
+}
+
+async function applyConfig() {
+  setError("");
+  await postJson("/api/config", formConfig());
+}
+
+async function start() {
+  if (!isRunning) await applyConfig();
+  await postJson("/api/start");
+}
+
+async function stop() {
+  setError("");
+  await postJson("/api/stop");
+}
+
+function shortSource(source) {
+  if (!source) return "";
+  const parts = source.split("/");
+  return parts.length > 2 ? parts.slice(-2).join("/") : source;
+}
+
+function setStatus(payload) {
+  const el = $("runStatus");
+  const status = payload.status || (payload.running ? "running" : "stopped");
+  el.textContent = labels[status] || status;
+  el.className = "run-pill";
+  if (payload.running) el.classList.add("running");
+  if (status === "error") el.classList.add("error");
+}
+
+function updateRows(recent) {
+  const rows = $("rows");
+  rows.innerHTML = "";
+  if (!recent || recent.length === 0) {
+    rows.innerHTML = `<tr class="empty-row"><td colspan="5">受信待ち</td></tr>`;
+    return;
+  }
+  for (const row of recent) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.time || ""}</td>
+      <td>${row.lat || ""}</td>
+      <td>${row.lon || ""}</td>
+      <td>${row.alt || ""}</td>
+      <td>${shortSource(row.source)}</td>
+    `;
+    rows.appendChild(tr);
+  }
+}
+
+function update(payload) {
+  const cfg = payload.config || {};
+  isRunning = Boolean(payload.running);
+  setStatus(payload);
+  setError(payload.error || "");
+
+  $("decoded").textContent = payload.decoded_count ?? 0;
+  $("samples").textContent = payload.total_samples ?? 0;
+  $("channel").textContent = `CH${cfg.gps_channel || 2}`;
+  $("csvPath").textContent = cfg.output_csv || "";
+
+  for (const [key, val] of Object.entries(cfg)) {
+    const el = $(key);
+    if (el && document.activeElement !== el) el.value = val;
+  }
+  $("mode").value = "command";
+
+  const latest = payload.latest;
+  $("latestTime").textContent = latest?.time || "まだ受信していません";
+  $("latestLon").textContent = latest?.lon || "-";
+  $("latestLat").textContent = latest?.lat || "-";
+  $("latestAlt").textContent = latest?.alt ? `${latest.alt} m` : "-";
+
+  updateRows(payload.recent);
+
+  $("startBtn").textContent = isRunning ? "取得中" : "開始";
+  $("startBtn").disabled = isRunning;
+  $("saveBtn").disabled = isRunning;
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = (event) => update(JSON.parse(event.data));
+  ws.onclose = () => setTimeout(connect, 1000);
+}
+
+$("saveBtn").addEventListener("click", () => applyConfig().catch((e) => setError(e.message)));
+$("startBtn").addEventListener("click", () => start().catch((e) => setError(e.message)));
+$("stopBtn").addEventListener("click", () => stop().catch((e) => setError(e.message)));
+
+connect();
