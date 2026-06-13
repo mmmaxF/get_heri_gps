@@ -438,6 +438,8 @@ Docker内部名をブラウザに見せない
   "text_color": "#ffffff",
   "stroke_color": "#000000",
   "stroke_width": 6,
+  "background_color": "#000000",
+  "background_opacity": 0.35,
   "key_background_opacity": 0.35,
   "box": {
     "x": 120,
@@ -450,6 +452,7 @@ Docker内部名をブラウザに見せない
 ```
 
 `text_align` は `left` / `center` / `right` を指定します。
+`background_color` と `background_opacity` はV信号側の文字背景マットの色・濃度です。
 `key_background_opacity` はKey信号側の背景マット濃度で、`0.0` の場合は文字以外が黒、`1.0` の場合は背景マットが白になります。
 
 ### 10.6 POST /api/start

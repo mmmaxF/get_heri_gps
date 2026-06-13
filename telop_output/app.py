@@ -118,12 +118,37 @@ def hex_to_rgba(value, alpha=1.0):
     return (r, g, b, max(0, min(255, int(float(alpha) * 255))))
 
 
+def display_font_name(path):
+    stem = path.stem
+    aliases = {
+        "ipaexg": "IPAex Gothic",
+        "ipaexm": "IPAex Mincho",
+        "ipag": "IPA Gothic",
+        "ipagp": "IPA P Gothic",
+        "ipam": "IPA Mincho",
+        "ipamp": "IPA P Mincho",
+        "TakaoGothic": "Takao Gothic",
+        "TakaoPGothic": "Takao P Gothic",
+        "TakaoMincho": "Takao Mincho",
+        "TakaoPMincho": "Takao P Mincho",
+    }
+    return aliases.get(stem, stem)
+
+
 def available_fonts():
-    font_roots = [
-        Path("/app/assets/fonts"),
-        Path("/usr/share/fonts/opentype/noto"),
-        Path("/usr/share/fonts/truetype/dejavu"),
-    ]
+    font_roots = [Path("/app/assets/fonts"), Path("/usr/share/fonts")]
+    japanese_markers = (
+        "noto",
+        "cjk",
+        "ipa",
+        "ipaex",
+        "ipag",
+        "ipam",
+        "takao",
+        "mplus",
+        "m+",
+    )
+    excluded_markers = ("dejavu", "codelatin", "mplus1code", "mplus2code", "mpluscode")
     fonts = []
     seen = set()
     paths = []
@@ -137,7 +162,13 @@ def available_fonts():
             continue
         seen.add(key)
         source = "custom" if str(path).startswith("/app/assets/fonts/") else "system"
-        fonts.append({"id": key, "label": path.stem, "source": source})
+        if source != "custom":
+            lowered = path.name.lower()
+            if any(marker in lowered for marker in excluded_markers):
+                continue
+            if not any(marker in lowered for marker in japanese_markers):
+                continue
+        fonts.append({"id": key, "label": display_font_name(path), "source": source})
     return fonts
 
 
@@ -145,9 +176,6 @@ def find_font(font_family):
     fonts = available_fonts()
     if font_family:
         requested = str(font_family)
-        requested_path = Path(requested)
-        if requested_path.is_file():
-            return str(requested_path)
         for item in fonts:
             if item["id"] == requested or item["label"] == requested:
                 return item["id"]

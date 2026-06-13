@@ -193,6 +193,10 @@ function syncKeyMatteValue() {
   $("telop_key_background_opacity_value").textContent = `${$("telop_key_background_opacity").value}%`;
 }
 
+function syncVMatteValue() {
+  $("telop_background_opacity_value").textContent = `${$("telop_background_opacity").value}%`;
+}
+
 async function getJson(url) {
   const res = await fetch(url);
   const data = await res.json();
@@ -240,13 +244,18 @@ function setTelopForm(cfg) {
   $("telop_key_mode").value = cfg.format?.key_mode || "matte";
   if ([...$("telop_font_family").options].some((opt) => opt.value === cfg.font_family)) {
     $("telop_font_family").value = cfg.font_family;
+  } else if ($("telop_font_family").options.length > 0) {
+    $("telop_font_family").selectedIndex = 0;
   }
   $("telop_text_align").value = cfg.text_align || "center";
   $("telop_font_size").value = cfg.font_size || 72;
   $("telop_text_color").value = cfg.text_color || "#ffffff";
+  $("telop_background_color").value = cfg.background_color || "#000000";
+  $("telop_background_opacity").value = Math.round((cfg.background_opacity ?? 0.35) * 100);
   $("telop_stroke_color").value = cfg.stroke_color || "#000000";
   $("telop_stroke_width").value = cfg.stroke_width ?? 6;
   $("telop_key_background_opacity").value = Math.round((cfg.key_background_opacity ?? cfg.background_opacity ?? 0.35) * 100);
+  syncVMatteValue();
   syncKeyMatteValue();
   updateTelopBox();
 }
@@ -269,6 +278,8 @@ function telopFormConfig() {
     text_align: $("telop_text_align").value,
     font_size: Number($("telop_font_size").value),
     text_color: $("telop_text_color").value,
+    background_color: $("telop_background_color").value,
+    background_opacity: Number($("telop_background_opacity").value) / 100,
     stroke_color: $("telop_stroke_color").value,
     stroke_width: Number($("telop_stroke_width").value),
     key_background_opacity: Number($("telop_key_background_opacity").value) / 100,
@@ -389,9 +400,10 @@ $("telopStopBtn").addEventListener("click", async () => {
     setTelopError(e.message);
   }
 });
-for (const id of ["telop_resolution", "telop_frame_rate", "telop_pixel_format", "telop_key_mode", "telop_font_family", "telop_text_align", "telop_font_size", "telop_text_color", "telop_stroke_color", "telop_stroke_width", "telop_key_background_opacity"]) {
+for (const id of ["telop_resolution", "telop_frame_rate", "telop_pixel_format", "telop_key_mode", "telop_font_family", "telop_text_align", "telop_font_size", "telop_text_color", "telop_background_color", "telop_background_opacity", "telop_stroke_color", "telop_stroke_width", "telop_key_background_opacity"]) {
   $(id).addEventListener("change", () => applyTelopConfig().catch((e) => setTelopError(e.message)));
 }
+$("telop_background_opacity").addEventListener("input", syncVMatteValue);
 $("telop_key_background_opacity").addEventListener("input", syncKeyMatteValue);
 $("telopBox").addEventListener("mousedown", startTelopDrag);
 window.addEventListener("resize", updateTelopBox);
