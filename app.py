@@ -24,6 +24,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from gps_demodulator import decode_samples
+
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -62,176 +64,6 @@ def format_japanese_time(dt):
     if dt.tzinfo is not None:
         dt = dt.astimezone(JST)
     return dt.strftime("%Y/%m/%d %H:%M:%S")
-
-
-def bcd_byte(b):
-    hi = (b >> 4) & 0xF
-    lo = b & 0xF
-    if hi > 9 or lo > 9:
-        return None
-    return hi * 10 + lo
-
-
-def parse_u16_bcd(buf):
-    if len(buf) != 2:
-        return None
-    a = bcd_byte(buf[0])
-    b = bcd_byte(buf[1])
-    if a is None or b is None:
-        return None
-    return a * 100 + b
-
-
-def parse_dms_bcd(buf):
-    if len(buf) != 5:
-        return None
-    deg_hi = bcd_byte(buf[0])
-    deg_lo = bcd_byte(buf[1])
-    minute = bcd_byte(buf[2])
-    second = bcd_byte(buf[3])
-    centi = bcd_byte(buf[4])
-    if None in (deg_hi, deg_lo, minute, second, centi):
-        return None
-    deg = deg_hi * 100 + deg_lo
-    if minute >= 60 or second >= 60:
-        return None
-    return deg + minute / 60.0 + (second + centi / 100.0) / 3600.0
-
-
-def parse_mod_info(info):
-    if not info.startswith(b":MOD") or len(info) < 21:
-        return None
-    payload = info[1:]
-    if not payload.startswith(b"MOD"):
-        return None
-    group = parse_u16_bcd(payload[3:5])
-    aircraft = parse_u16_bcd(payload[5:7])
-    lat = parse_dms_bcd(payload[7:12])
-    lon = parse_dms_bcd(payload[12:17])
-    alt = parse_u16_bcd(payload[17:19])
-    if lat is None or lon is None or alt is None:
-        return None
-    return {
-        "group": group,
-        "aircraft": aircraft,
-        "lat": lat,
-        "lon": lon,
-        "alt": alt,
-        "payload_hex": payload.hex(),
-    }
-
-
-FLAG = np.asarray([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
-
-
-def goertzel(blocks, freq):
-    n = blocks.shape[1]
-    t = np.arange(n, dtype=np.float32) / SAMPLE_RATE
-    osc = np.exp(-2j * np.pi * freq * t).astype(np.complex64)
-    v = blocks @ osc
-    return v.real * v.real + v.imag * v.imag
-
-
-def fsk_bits(x, phase):
-    step = int(round(SAMPLE_RATE / 1200))
-    start = int(round(phase * step))
-    usable = ((len(x) - start) // step) * step
-    if usable < step * 64:
-        return None
-    blocks = x[start : start + usable].reshape(-1, step)
-    return (goertzel(blocks, 1800) > goertzel(blocks, 1200)).astype(np.uint8)
-
-
-def diff_bits(bits):
-    if bits is None or len(bits) < 2:
-        return bits
-    return (bits[1:] ^ bits[:-1]).astype(np.uint8)
-
-
-def find_flags(bits):
-    flags = []
-    for i in range(0, len(bits) - 7):
-        if np.array_equal(bits[i : i + 8], FLAG):
-            flags.append(i)
-    return flags
-
-
-def unstuff(bits):
-    out = []
-    ones = 0
-    i = 0
-    while i < len(bits):
-        bit = int(bits[i])
-        out.append(bit)
-        if bit:
-            ones += 1
-            if ones == 5:
-                if i + 1 < len(bits) and bits[i + 1] == 0:
-                    i += 1
-                ones = 0
-        else:
-            ones = 0
-        i += 1
-    return np.asarray(out, dtype=np.uint8)
-
-
-def bits_to_bytes_lsb(bits):
-    usable = (len(bits) // 8) * 8
-    if usable <= 0:
-        return b""
-    arr = bits[:usable].reshape(-1, 8)
-    return np.packbits(arr[:, ::-1].astype(np.uint8), axis=1, bitorder="big")[:, 0].tobytes()
-
-
-def crc16_x25(data):
-    crc = 0xFFFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            if crc & 1:
-                crc = (crc >> 1) ^ 0x8408
-            else:
-                crc >>= 1
-    return crc & 0xFFFF
-
-
-def decode_bits(bits):
-    flags = find_flags(bits)
-    frames = []
-    for a, b in zip(flags, flags[1:]):
-        if b - a < 24:
-            continue
-        payload_bits = unstuff(bits[a + 8 : b])
-        frame = bits_to_bytes_lsb(payload_bits)
-        if len(frame) >= 18:
-            frames.append((a, b, frame))
-    return frames
-
-
-def decode_samples(samples, window_start_sample):
-    x = samples.astype(np.float32)
-    x -= float(np.mean(x))
-    peak = float(np.max(np.abs(x))) or 1.0
-    x /= peak
-    best_rows = []
-    for phase in (0.0, 0.25, 0.5, 0.75):
-        bits = fsk_bits(x, phase)
-        if bits is None:
-            continue
-        bits = 1 - diff_bits(bits)
-        phase_rows = []
-        for bit_start, _bit_end, frame in decode_bits(bits):
-            if len(frame) < 18 or frame[14] != 0x03 or frame[15] != 0xF0:
-                continue
-            if crc16_x25(frame) != 0xF0B8:
-                continue
-            parsed = parse_mod_info(frame[16:-2])
-            if parsed:
-                sample_offset = window_start_sample + int(bit_start * SAMPLE_RATE / 1200)
-                phase_rows.append((sample_offset, phase, parsed))
-        if len(phase_rows) > len(best_rows):
-            best_rows = phase_rows
-    return best_rows
 
 
 @dataclass
@@ -510,9 +342,9 @@ def worker_main():
             if time.monotonic() < next_decode or len(sample_buffer) < SAMPLE_RATE * 4:
                 continue
             next_decode = time.monotonic() + config.decode_interval_seconds
-            for sample_offset, _phase, parsed in decode_samples(sample_buffer, buffer_start_sample):
-                offset_sec = sample_offset / SAMPLE_RATE
-                key = (round(offset_sec, 2), parsed["payload_hex"])
+            for fix in decode_samples(sample_buffer, buffer_start_sample, sample_rate=SAMPLE_RATE):
+                offset_sec = fix.sample_offset / SAMPLE_RATE
+                key = (round(offset_sec, 2), fix.payload_hex)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -523,12 +355,12 @@ def worker_main():
                     "source": source_name,
                     "channel": config.gps_channel,
                     "offset_sec": f"{offset_sec:.6f}",
-                    "lon": f"{parsed['lon']:.8f}",
-                    "lat": f"{parsed['lat']:.8f}",
-                    "alt": parsed["alt"],
-                    "group": parsed["group"],
-                    "aircraft": "" if parsed["aircraft"] is None else parsed["aircraft"],
-                    "payload_hex": parsed["payload_hex"],
+                    "lon": f"{fix.lon:.8f}",
+                    "lat": f"{fix.lat:.8f}",
+                    "alt": fix.alt,
+                    "group": fix.group,
+                    "aircraft": "" if fix.aircraft is None else fix.aircraft,
+                    "payload_hex": fix.payload_hex,
                 }
                 geocode = post_reverse_geocode(config, row)
                 if geocode:

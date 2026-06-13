@@ -24,6 +24,32 @@ info = :MOD...
 MOD内のBCD/DMSから緯度・経度・高度を抽出
 ```
 
+復調処理の本体は、このプロジェクト内の以下にあります。
+
+```text
+gps_demodulator.py
+```
+
+処理の流れ:
+
+```text
+1. 単一音声チャンネルの signed 16-bit little-endian PCM を読む
+2. 1200Hz / 1800Hz の強さを1ビット区間ごとに比較する
+3. 1200baud のビット列へ戻す
+4. differential decode + invert を行う
+5. HDLCフラグ 0x7e でフレーム分割する
+6. bit stuffing を解除する
+7. AX.25風ヘッダと X.25 CRC を検証する
+8. info部の :MOD を取り出す
+9. MOD内のBCD/DMSから緯度・経度・高度を得る
+```
+
+実機SDIなしでRAW/captureディレクトリを復調する場合:
+
+```bash
+python demodulate_gps.py ../audio_capture/20260613_132355 --channel 2 --limit-sec 60 --output output/demodulated_gps.csv
+```
+
 ## 起動
 
 ```bash
