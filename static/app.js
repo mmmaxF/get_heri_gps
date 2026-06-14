@@ -10,6 +10,7 @@ let isRunning = false;
 const defaultChannelsByDevice = new Map();
 let telopConfig = null;
 let telopDrag = null;
+let pendingConfig = null;
 
 function formConfig() {
   const device = $("input_device").value;
@@ -46,7 +47,13 @@ function setError(message) {
 async function applyConfig() {
   setError("");
   syncCommandPreview();
-  await postJson("/api/config", formConfig());
+  pendingConfig = formConfig();
+  try {
+    const res = await postJson("/api/config", pendingConfig);
+    if (res.status) update(res.status);
+  } finally {
+    pendingConfig = null;
+  }
 }
 
 async function start() {
@@ -156,7 +163,7 @@ function updateRows(recent) {
 }
 
 function update(payload) {
-  const cfg = payload.config || {};
+  const cfg = pendingConfig || payload.config || {};
   isRunning = Boolean(payload.running);
   setStatus(payload);
   setError(payload.error || "");
@@ -396,7 +403,10 @@ async function refreshTelopStatus() {
 $("saveBtn").addEventListener("click", () => applyConfig().catch((e) => setError(e.message)));
 $("startBtn").addEventListener("click", () => start().catch((e) => setError(e.message)));
 $("stopBtn").addEventListener("click", () => stop().catch((e) => setError(e.message)));
-$("input_device").addEventListener("change", applyDeviceDefaultChannels);
+$("input_device").addEventListener("change", () => {
+  applyDeviceDefaultChannels();
+  applyConfig().catch((e) => setError(e.message));
+});
 $("input_channels").addEventListener("input", syncCommandPreview);
 $("telopApplyBtn").addEventListener("click", () => applyTelopConfig().catch((e) => setTelopError(e.message)));
 $("telopStartBtn").addEventListener("click", async () => {
