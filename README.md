@@ -209,15 +209,21 @@ curl http://127.0.0.1:8030/api/status
 
 ## 実SDI入力
 
-実SDI入力では、UIの `入力デバイス` プルダウンからAJAなどの録音デバイスを選びます。
+実SDI入力では、UIの `入力デバイス` プルダウンからAJAやHDMI to USBキャプチャなどの録音デバイスを選びます。
 アプリは選択デバイスから自動で `arecord` コマンドを生成します。
-プルダウンには、OSが認識しているSDI/AJA/Blackmagic系の入力デバイスだけを表示します。
+プルダウンには、OSが認識しているSDI/AJA/Blackmagic系、またはHDMI to USBキャプチャ系の入力デバイスだけを表示します。
 対象キーワードを変える場合は、`docker-compose.yml` の `CAPTURE_DEVICE_INCLUDE_KEYWORDS` を変更してください。
 
-今回のAJA U-TAPでは、以下のように見えます。
+AJA U-TAPでは、以下のように見えます。
 
 ```text
 AJA U-TAP 709042 / USB Audio (hw:2,0)
+```
+
+MS2109系のHDMI to USBキャプチャでは、以下のように見えます。
+
+```text
+MS2109 / USB Audio (hw:3,0)
 ```
 
 通常の操作:

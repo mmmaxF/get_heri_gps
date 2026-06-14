@@ -56,7 +56,7 @@ DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://re
 DEFAULT_TELOP_OUTPUT_URL = os.environ.get("TELOP_OUTPUT_URL", "http://telop-output:8030")
 CAPTURE_DEVICE_INCLUDE_KEYWORDS = [
     item.strip().lower()
-    for item in os.environ.get("CAPTURE_DEVICE_INCLUDE_KEYWORDS", "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI").split(",")
+    for item in os.environ.get("CAPTURE_DEVICE_INCLUDE_KEYWORDS", "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI,MS2109,USB Audio").split(",")
     if item.strip()
 ]
 DISPLAY_OUTPUT_INCLUDE_UNKNOWN = os.environ.get("DISPLAY_OUTPUT_INCLUDE_UNKNOWN", "0").lower() in ("1", "true", "yes", "on")
