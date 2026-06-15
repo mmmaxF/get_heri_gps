@@ -174,6 +174,16 @@ CSVはホスト側の以下に保存されます。
 ./gps_receiver/output/gps_positions.csv
 ```
 
+実SDI受信中のログは以下に出ます。各ログは容量上限付きでローテーションします。
+
+```text
+gps_receiver/logs/gps_receiver.log
+reverse_geocoder/logs/reverse_geocoder.log
+telop_output/logs/telop_output.log
+```
+
+詳しいデータフローとログの見方は `DATA_FLOW.md` を参照してください。
+
 コンテナ内で録音デバイスを確認する場合:
 
 ```bash

@@ -485,3 +485,57 @@ gps_receiver/static/app.js
 | `telop_output/.env` | 最新地名取得URL、テロップ設定ファイルパス |
 
 別サーバへ分ける場合は、各フォルダを個別に配置し、そのフォルダの `.env` 内の接続先URLを実サーバIPまたはホスト名へ変更します。
+
+## 13. ログ出力
+
+実SDI受信中は、主要なデータフローが各コンテナのローテーションログに出ます。
+
+| コンテナ | ログファイル | 主な内容 |
+|---|---|---|
+| `get_heri_gps` | `gps_receiver/logs/gps_receiver.log` | 音声入力開始、入力進捗、復調成功、GPS座標、CSV保存、逆ジオ送信 |
+| `reverse_geocoder` | `reverse_geocoder/logs/reverse_geocoder.log` | 緯度経度受信、行政区域検索結果、地名CSV保存 |
+| `telop_output` | `telop_output/logs/telop_output.log` | 最新地名取得、テロップ文字列変更、設定保存、開始/停止 |
+
+ログはPythonの `RotatingFileHandler` でローテーションします。デフォルトは以下です。
+
+```text
+LOG_MAX_BYTES=5242880
+LOG_BACKUP_COUNT=5
+```
+
+つまり、各ログは約5MBでローテーションし、過去5世代まで保持します。
+
+Docker標準出力ログにも上限を付けています。
+
+```text
+DOCKER_LOG_MAX_SIZE=10m
+DOCKER_LOG_MAX_FILE=3
+```
+
+ログを追う例:
+
+```bash
+tail -f gps_receiver/logs/gps_receiver.log
+tail -f reverse_geocoder/logs/reverse_geocoder.log
+tail -f telop_output/logs/telop_output.log
+```
+
+GPS受信時に特に見るべき流れ:
+
+```text
+gps_receiver:
+  flow=input mode=sdi
+  flow=input progress
+  flow=demod decode_ok
+  flow=gps fix
+  flow=csv write
+  flow=reverse_geocode post
+
+reverse_geocoder:
+  flow=geocoder receive
+  flow=geocoder success
+  flow=geocoder csv_write
+
+telop_output:
+  flow=telop text_update
+```

@@ -13,3 +13,9 @@ services:
     volumes:
       - "./config:/app/config"
       - "./assets:/app/assets"
+      - "./logs:/app/logs"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -5,6 +5,8 @@
 import asyncio
 import csv
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 import re
 import shlex
@@ -55,12 +57,43 @@ DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 DEFAULT_TELOP_OUTPUT_URL = os.environ.get("TELOP_OUTPUT_URL", "http://telop-output:8030")
+LOG_DIR = Path(os.environ.get("LOG_DIR", "/app/logs"))
+LOG_FILE = os.environ.get("LOG_FILE", "gps_receiver.log")
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+LOG_MAX_BYTES = env_int("LOG_MAX_BYTES", 5 * 1024 * 1024)
+LOG_BACKUP_COUNT = env_int("LOG_BACKUP_COUNT", 5)
+LOG_PROGRESS_SECONDS = env_float("LOG_PROGRESS_SECONDS", 5.0)
 CAPTURE_DEVICE_INCLUDE_KEYWORDS = [
     item.strip().lower()
     for item in os.environ.get("CAPTURE_DEVICE_INCLUDE_KEYWORDS", "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI,MS2109,USB Audio").split(",")
     if item.strip()
 ]
 DISPLAY_OUTPUT_INCLUDE_UNKNOWN = os.environ.get("DISPLAY_OUTPUT_INCLUDE_UNKNOWN", "0").lower() in ("1", "true", "yes", "on")
+
+
+def setup_logger():
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("gps_receiver")
+    logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    logger.propagate = False
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    if not logger.handlers:
+        file_handler = RotatingFileHandler(
+            LOG_DIR / LOG_FILE,
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        logger.addHandler(stream_handler)
+    return logger
+
+
+LOGGER = setup_logger()
+LOGGER.info("flow=gps_receiver init sample_rate=%s output_csv=%s reverse_geocoder_url=%s telop_output_url=%s", SAMPLE_RATE, DEFAULT_OUTPUT_CSV, DEFAULT_REVERSE_GEOCODER_URL, DEFAULT_TELOP_OUTPUT_URL)
 
 
 def now_jst():
@@ -204,6 +237,7 @@ CSV_HEADER = ["time", "source", "channel", "offset_sec", "lon", "lat", "alt", "g
 def post_reverse_geocode(config, row):
     url = (config.reverse_geocoder_url or "").strip()
     if not url:
+        LOGGER.info("flow=reverse_geocode skipped reason=no_url lat=%s lon=%s", row.get("lat"), row.get("lon"))
         return None
     payload = {
         "time": row["time"],
@@ -216,19 +250,24 @@ def post_reverse_geocode(config, row):
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
+        LOGGER.info("flow=reverse_geocode post url=%s lat=%s lon=%s alt=%s", url, row.get("lat"), row.get("lon"), row.get("alt"))
         with urllib.request.urlopen(req, timeout=0.8) as res:
             body = res.read(8192)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        LOGGER.warning("flow=reverse_geocode error url=%s error=%s", url, exc)
         STATE.mark_geocode_error(str(exc))
         return None
     try:
         geocode = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        LOGGER.warning("flow=reverse_geocode invalid_response error=%s", exc)
         STATE.mark_geocode_error(f"invalid geocoder response: {exc}")
         return None
     if geocode.get("ok") is False:
+        LOGGER.warning("flow=reverse_geocode not_found lat=%s lon=%s error=%s", row.get("lat"), row.get("lon"), geocode.get("error", "reverse geocoder error"))
         STATE.mark_geocode_error(str(geocode.get("error", "reverse geocoder error")))
         return None
+    LOGGER.info("flow=reverse_geocode success address=%s lat=%s lon=%s", geocode.get("address_label", ""), row.get("lat"), row.get("lon"))
     STATE.mark_geocode_success(geocode)
     return geocode
 
@@ -256,10 +295,12 @@ class CsvWriter:
         if self.path.stat().st_size == 0:
             self.writer.writerow(CSV_HEADER)
             self.file.flush()
+        LOGGER.info("flow=csv open path=%s", self.path)
 
     def write(self, row):
         self.writer.writerow([row.get(k, "") for k in CSV_HEADER])
         self.file.flush()
+        LOGGER.info("flow=csv write path=%s time=%s lat=%s lon=%s alt=%s", self.path, row.get("time"), row.get("lat"), row.get("lon"), row.get("alt"))
 
     def close(self):
         self.file.close()
@@ -281,6 +322,7 @@ def iter_test_chunks(config, stop_event):
     raw_path = capture_dir / f"ch{config.gps_channel}.raw"
     if not raw_path.exists():
         raise FileNotFoundError(f"test raw not found: {raw_path}")
+    LOGGER.info("flow=input mode=test raw=%s channel=%s sample_rate=%s", raw_path, config.gps_channel, SAMPLE_RATE)
     start_time = read_metadata_start(capture_dir)
     chunk_samples = int(SAMPLE_RATE * 0.25)
     with raw_path.open("rb") as f:
@@ -298,6 +340,7 @@ def iter_command_chunks(config, stop_event):
     if not command:
         raise RuntimeError("INPUT_COMMAND is empty")
     cmd = shlex.split(command)
+    LOGGER.info("flow=input mode=sdi command=%s gps_channel=%s input_channels=%s sample_rate=%s", command, config.gps_channel, config.input_channels, SAMPLE_RATE)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     source = command
     start_time = now_jst()
@@ -316,6 +359,7 @@ def iter_command_chunks(config, stop_event):
             ch_index = max(0, min(config.gps_channel - 1, config.input_channels - 1))
             yield arr[:, ch_index].copy(), source, start_time
     finally:
+        LOGGER.info("flow=input stop command=%s", command)
         proc.terminate()
         try:
             proc.wait(timeout=2)
@@ -334,6 +378,15 @@ def worker_main():
     next_decode = time.monotonic() + config.decode_interval_seconds
     seen = set()
     total_samples = 0
+    last_progress = time.monotonic()
+    LOGGER.info(
+        "flow=worker start mode=%s input_device=%s gps_channel=%s input_channels=%s output_csv=%s",
+        config.mode,
+        config.input_device,
+        config.gps_channel,
+        config.input_channels,
+        config.output_csv,
+    )
     try:
         source_iter = iter_test_chunks(config, STATE.stop_event) if config.mode == "test" else iter_command_chunks(config, STATE.stop_event)
         source_name = ""
@@ -342,6 +395,15 @@ def worker_main():
             total_samples += len(chunk)
             STATE.set_samples(total_samples)
             sample_buffer = np.concatenate([sample_buffer, chunk])
+            now = time.monotonic()
+            if now - last_progress >= LOG_PROGRESS_SECONDS:
+                LOGGER.info(
+                    "flow=input progress source=%s total_samples=%s buffer_samples=%s",
+                    source_name,
+                    total_samples,
+                    len(sample_buffer),
+                )
+                last_progress = now
             keep = int(config.window_seconds * SAMPLE_RATE)
             if len(sample_buffer) > keep:
                 drop = len(sample_buffer) - keep
@@ -350,7 +412,12 @@ def worker_main():
             if time.monotonic() < next_decode or len(sample_buffer) < SAMPLE_RATE * 4:
                 continue
             next_decode = time.monotonic() + config.decode_interval_seconds
-            for fix in decode_samples(sample_buffer, buffer_start_sample, sample_rate=SAMPLE_RATE):
+            fixes = decode_samples(sample_buffer, buffer_start_sample, sample_rate=SAMPLE_RATE)
+            if fixes:
+                LOGGER.info("flow=demod decode_ok fixes=%s buffer_samples=%s buffer_start=%s", len(fixes), len(sample_buffer), buffer_start_sample)
+            else:
+                LOGGER.debug("flow=demod no_fix buffer_samples=%s buffer_start=%s", len(sample_buffer), buffer_start_sample)
+            for fix in fixes:
                 offset_sec = fix.sample_offset / SAMPLE_RATE
                 key = (round(offset_sec, 2), fix.payload_hex)
                 if key in seen:
@@ -370,14 +437,26 @@ def worker_main():
                     "aircraft": "" if fix.aircraft is None else fix.aircraft,
                     "payload_hex": fix.payload_hex,
                 }
+                LOGGER.info(
+                    "flow=gps fix time=%s lat=%s lon=%s alt=%s group=%s aircraft=%s offset_sec=%.6f",
+                    row["time"],
+                    row["lat"],
+                    row["lon"],
+                    row["alt"],
+                    row["group"],
+                    row["aircraft"],
+                    offset_sec,
+                )
                 geocode = post_reverse_geocode(config, row)
                 if geocode:
                     row["geocode"] = geocode
                 writer.write(row)
                 STATE.add_row(row)
     except Exception as exc:
+        LOGGER.exception("flow=worker error error=%s", exc)
         STATE.mark_stopped(str(exc))
     else:
+        LOGGER.info("flow=worker stop reason=completed total_samples=%s decoded_count=%s", total_samples, STATE.decoded_count)
         STATE.mark_stopped()
     finally:
         writer.close()

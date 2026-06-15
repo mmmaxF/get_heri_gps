@@ -47,10 +47,13 @@ fi
 
 mkdir -p "$(env_value HOST_GPS_OUTPUT_DIR ./gps_receiver/output)"
 mkdir -p "$(env_value HOST_GPS_INPUT_DIR ./gps_receiver/input)"
+mkdir -p "$(env_value HOST_GPS_LOG_DIR ./gps_receiver/logs)"
 mkdir -p "$(env_value HOST_GEOCODER_DATA_DIR ./reverse_geocoder/data)"
 mkdir -p "$(env_value HOST_GEOCODER_OUTPUT_DIR ./reverse_geocoder/output)"
+mkdir -p "$(env_value HOST_GEOCODER_LOG_DIR ./reverse_geocoder/logs)"
 mkdir -p "$(env_value HOST_TELOP_CONFIG_DIR ./telop_output/config)"
 mkdir -p "$(env_value HOST_TELOP_ASSETS_DIR ./telop_output/assets)"
+mkdir -p "$(env_value HOST_TELOP_LOG_DIR ./telop_output/logs)"
 
 echo "get_heri_gps Dockerコンテナを作成・起動します..."
 docker compose up -d --build

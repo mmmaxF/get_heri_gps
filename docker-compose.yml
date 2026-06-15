@@ -16,6 +16,12 @@ services:
       - "audio"
     volumes:
       - "${HOST_GPS_OUTPUT_DIR:-./gps_receiver/output}:/app/output"
+      - "${HOST_GPS_LOG_DIR:-./gps_receiver/logs}:/app/logs"
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-3}"
 
   gps-demodulator:
     build:
@@ -33,6 +39,12 @@ services:
     volumes:
       - "${HOST_GPS_INPUT_DIR:-./gps_receiver/input}:/app/input:ro"
       - "${HOST_GPS_OUTPUT_DIR:-./gps_receiver/output}:/app/output"
+      - "${HOST_GPS_LOG_DIR:-./gps_receiver/logs}:/app/logs"
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-3}"
 
   reverse-geocoder:
     build:
@@ -48,6 +60,12 @@ services:
     volumes:
       - "${HOST_GEOCODER_DATA_DIR:-./reverse_geocoder/data}:/app/data"
       - "${HOST_GEOCODER_OUTPUT_DIR:-./reverse_geocoder/output}:/app/output"
+      - "${HOST_GEOCODER_LOG_DIR:-./reverse_geocoder/logs}:/app/logs"
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-3}"
 
   telop-output:
     build:
@@ -63,3 +81,9 @@ services:
     volumes:
       - "${HOST_TELOP_CONFIG_DIR:-./telop_output/config}:/app/config"
       - "${HOST_TELOP_ASSETS_DIR:-./telop_output/assets}:/app/assets"
+      - "${HOST_TELOP_LOG_DIR:-./telop_output/logs}:/app/logs"
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-3}"

@@ -3,6 +3,8 @@
 
 import io
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 import threading
 import urllib.error
@@ -20,6 +22,35 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(float(os.environ.get("PORT", "8030")))
 CONFIG_PATH = Path(os.environ.get("TELOP_CONFIG_PATH", "/app/config/telop_config.json"))
 REVERSE_GEOCODER_LATEST_URL = os.environ.get("REVERSE_GEOCODER_LATEST_URL", "http://reverse-geocoder:8020/api/latest")
+LOG_DIR = Path(os.environ.get("LOG_DIR", "/app/logs"))
+LOG_FILE = os.environ.get("LOG_FILE", "telop_output.log")
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+LOG_MAX_BYTES = int(float(os.environ.get("LOG_MAX_BYTES", 5 * 1024 * 1024)))
+LOG_BACKUP_COUNT = int(float(os.environ.get("LOG_BACKUP_COUNT", 5)))
+
+
+def setup_logger():
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("telop_output")
+    logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    logger.propagate = False
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    if not logger.handlers:
+        file_handler = RotatingFileHandler(
+            LOG_DIR / LOG_FILE,
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        logger.addHandler(stream_handler)
+    return logger
+
+
+LOGGER = setup_logger()
 
 
 DEFAULT_CONFIG = {
@@ -63,6 +94,7 @@ class State:
         self.running = False
         self.latest_text = ""
         self.latest_geocode = None
+        self.last_logged_text = ""
         self.error = ""
 
     def load_config(self):
@@ -78,6 +110,7 @@ class State:
     def save_config(self):
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(json.dumps(self.config, ensure_ascii=False, indent=2), encoding="utf-8")
+        LOGGER.info("flow=telop config_saved path=%s", CONFIG_PATH)
 
     def snapshot(self):
         with self.lock:
@@ -100,6 +133,7 @@ def deep_update(base, incoming):
 
 
 STATE = State()
+LOGGER.info("flow=telop init config=%s reverse_latest_url=%s", CONFIG_PATH, REVERSE_GEOCODER_LATEST_URL)
 app = FastAPI(title="telop_output")
 
 
@@ -202,8 +236,10 @@ def get_latest_geocode():
         with urllib.request.urlopen(REVERSE_GEOCODER_LATEST_URL, timeout=0.5) as res:
             data = json.loads(res.read(8192).decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        LOGGER.debug("flow=telop latest_geocode unavailable url=%s", REVERSE_GEOCODER_LATEST_URL)
         return None
     if not data.get("ok"):
+        LOGGER.debug("flow=telop latest_geocode empty url=%s error=%s", REVERSE_GEOCODER_LATEST_URL, data.get("error", ""))
         return None
     return data
 
@@ -247,6 +283,15 @@ def render_rgba(config, key_background_opacity=None):
     with STATE.lock:
         STATE.latest_text = text
         STATE.latest_geocode = geocode
+        if text != STATE.last_logged_text:
+            LOGGER.info(
+                "flow=telop text_update text=%s address=%s lat=%s lon=%s",
+                text,
+                (geocode or {}).get("address_label", ""),
+                (geocode or {}).get("lat", ""),
+                (geocode or {}).get("lon", ""),
+            )
+            STATE.last_logged_text = text
 
     box = config.get("box", {})
     x = int(float(box.get("x", 120)))
@@ -331,6 +376,7 @@ async def set_config(payload: dict):
     with STATE.lock:
         deep_update(STATE.config, payload)
         STATE.save_config()
+    LOGGER.info("flow=telop config_update keys=%s", ",".join(sorted(payload.keys())))
     return {"ok": True, "config": STATE.snapshot()["config"]}
 
 
@@ -339,6 +385,7 @@ def start():
     with STATE.lock:
         STATE.running = True
         STATE.error = ""
+    LOGGER.info("flow=telop start")
     return {"ok": True}
 
 
@@ -346,11 +393,13 @@ def start():
 def stop():
     with STATE.lock:
         STATE.running = False
+    LOGGER.info("flow=telop stop")
     return {"ok": True}
 
 
 @app.get("/api/preview/v.png")
 def preview_v():
+    LOGGER.debug("flow=telop preview type=v")
     img = render_rgba(STATE.snapshot()["config"])
     bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
     return png_response(Image.alpha_composite(bg, img).convert("RGB"))
@@ -358,6 +407,7 @@ def preview_v():
 
 @app.get("/api/preview/key.png")
 def preview_key():
+    LOGGER.debug("flow=telop preview type=key")
     config = STATE.snapshot()["config"]
     key_opacity = config.get("key_background_opacity", config.get("background_opacity", 0.35))
     img = render_rgba(config, key_background_opacity=key_opacity)

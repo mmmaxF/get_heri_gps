@@ -3,9 +3,12 @@ __pycache__/
 .venv/
 output/
 gps_receiver/output/
+gps_receiver/logs/
 reverse_geocoder/data/
 reverse_geocoder/output/
+reverse_geocoder/logs/
 telop_output/config/*.json
+telop_output/logs/
 gps_receiver/input/*
 !gps_receiver/input/.gitkeep
 .env
