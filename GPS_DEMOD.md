@@ -58,22 +58,22 @@ correctData/trk10.20260613-135355.csv
 ### get_heri_gps内の復調実装
 
 ```text
-gps_demodulator.py
+gps_receiver/gps_demodulator.py
 ```
 
 リアルタイムアプリとCLIが共通で使う復調ロジックです。
 
 ```text
-demodulate_gps.py
+gps_receiver/demodulate_gps.py
 ```
 
 実機SDIなしで、過去の `audio_capture/*/ch2.raw` や単体RAWファイルからGPS CSVを作るCLIです。
 
 ```text
-app.py
+gps_receiver/app.py
 ```
 
-Web UI/APIからSDI音声を受け、`gps_demodulator.py` を呼んでリアルタイムにGPSを抽出します。
+Web UI/APIからSDI音声を受け、`gps_receiver/gps_demodulator.py` を呼んでリアルタイムにGPSを抽出します。
 
 ### 出力CSV
 
@@ -406,17 +406,17 @@ tail -5 mod_gps_today.csv
 現在の `get_heri_gps` では、復調処理は以下のように組み込まれています。
 
 ```text
-gps_demodulator.py : 復調本体
-app.py             : SDI/ALSA入力からリアルタイム復調
-demodulate_gps.py  : captureディレクトリまたはRAWファイルのオフライン復調
-GPS_DEMOD.md       : 復調方式の説明
-README.md          : 起動・操作・CLI利用方法
+gps_receiver/gps_demodulator.py : 復調本体
+gps_receiver/app.py             : SDI/ALSA入力からリアルタイム復調
+gps_receiver/demodulate_gps.py  : captureディレクトリまたはRAWファイルのオフライン復調
+GPS_DEMOD.md                    : 復調方式の説明
+README.md                       : 起動・操作・CLI利用方法
 ```
 
 オフライン復調の例:
 
 ```bash
-python demodulate_gps.py ../audio_capture/20260613_132355 \
+python gps_receiver/demodulate_gps.py ../audio_capture/20260613_132355 \
   --channel 2 \
   --limit-sec 60 \
   --output output/demodulated_gps.csv

@@ -1,59 +1,38 @@
 services:
   get-heri-gps:
     build:
-      context: .
+      context: ./gps_receiver
       args:
-        APP_PORT: "${APP_PORT:-8010}"
+        APP_PORT: "${GPS_RECEIVER_PORT:-8010}"
     container_name: get_heri_gps
     restart: unless-stopped
+    env_file:
+      - "${GPS_RECEIVER_ENV_FILE:-./gps_receiver/.env}"
     ports:
-      - "${APP_PORT:-8010}:${APP_PORT:-8010}"
-    environment:
-      HOST: "${APP_HOST:-0.0.0.0}"
-      PORT: "${APP_PORT:-8010}"
-      SAMPLE_RATE: "${SAMPLE_RATE:-48000}"
-      GPS_BAUD: "${GPS_BAUD:-1200}"
-      GPS_MARK_HZ: "${GPS_MARK_HZ:-1200}"
-      GPS_SPACE_HZ: "${GPS_SPACE_HZ:-1800}"
-      INPUT_DEVICE: "${INPUT_DEVICE:-hw:2,0}"
-      INPUT_CHANNELS: "${INPUT_CHANNELS:-2}"
-      GPS_CHANNEL: "${GPS_CHANNEL:-2}"
-      CAPTURE_DEVICE_INCLUDE_KEYWORDS: "${CAPTURE_DEVICE_INCLUDE_KEYWORDS:-AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI,MS2109,USB Audio}"
-      OUTPUT_CSV: "${OUTPUT_CSV:-/app/output/gps_positions.csv}"
-      REVERSE_GEOCODER_URL: "${REVERSE_GEOCODER_URL:-http://reverse-geocoder:8020/api/position}"
-      TELOP_OUTPUT_URL: "${TELOP_OUTPUT_URL:-http://telop-output:8030}"
-      WINDOW_SECONDS: "${WINDOW_SECONDS:-20.0}"
-      DECODE_INTERVAL_SECONDS: "${DECODE_INTERVAL_SECONDS:-1.0}"
+      - "${GPS_RECEIVER_PORT:-8010}:${GPS_RECEIVER_PORT:-8010}"
     devices:
       - "/dev/snd:/dev/snd"
     group_add:
       - "audio"
     volumes:
-      - "${HOST_OUTPUT_DIR:-./output}:/app/output"
+      - "${HOST_GPS_OUTPUT_DIR:-./gps_receiver/output}:/app/output"
 
   gps-demodulator:
     build:
-      context: .
+      context: ./gps_receiver
       args:
-        APP_PORT: "${APP_PORT:-8010}"
+        APP_PORT: "${GPS_RECEIVER_PORT:-8010}"
     profiles:
       - tools
-    environment:
-      SAMPLE_RATE: "${SAMPLE_RATE:-48000}"
-      GPS_BAUD: "${GPS_BAUD:-1200}"
-      GPS_MARK_HZ: "${GPS_MARK_HZ:-1200}"
-      GPS_SPACE_HZ: "${GPS_SPACE_HZ:-1800}"
+    env_file:
+      - "${GPS_RECEIVER_ENV_FILE:-./gps_receiver/.env}"
     command:
-      - "python"
-      - "demodulate_gps.py"
-      - "${GPS_DEMOD_INPUT_DIR:-/app/input}"
-      - "--channel"
-      - "${GPS_CHANNEL:-2}"
-      - "--output"
-      - "${GPS_DEMOD_OUTPUT_CSV:-/app/output/demodulated_gps.csv}"
+      - "sh"
+      - "-c"
+      - 'python demodulate_gps.py "$${GPS_DEMOD_INPUT_DIR:-/app/input}" --channel "$${GPS_CHANNEL:-2}" --output "$${GPS_DEMOD_OUTPUT_CSV:-/app/output/demodulated_gps.csv}"'
     volumes:
-      - "${HOST_INPUT_DIR:-./input}:/app/input:ro"
-      - "${HOST_OUTPUT_DIR:-./output}:/app/output"
+      - "${HOST_GPS_INPUT_DIR:-./gps_receiver/input}:/app/input:ro"
+      - "${HOST_GPS_OUTPUT_DIR:-./gps_receiver/output}:/app/output"
 
   reverse-geocoder:
     build:
@@ -62,16 +41,10 @@ services:
         REVERSE_GEOCODER_PORT: "${REVERSE_GEOCODER_PORT:-8020}"
     container_name: reverse_geocoder
     restart: unless-stopped
+    env_file:
+      - "${REVERSE_GEOCODER_ENV_FILE:-./reverse_geocoder/.env}"
     ports:
       - "${REVERSE_GEOCODER_PORT:-8020}:${REVERSE_GEOCODER_PORT:-8020}"
-    environment:
-      HOST: "${REVERSE_GEOCODER_HOST:-0.0.0.0}"
-      PORT: "${REVERSE_GEOCODER_PORT:-8020}"
-      GEOCODER_AUTO_UPDATE: "${GEOCODER_AUTO_UPDATE:-1}"
-      GEOCODER_UPDATE_DAYS: "${GEOCODER_UPDATE_DAYS:-30}"
-      GEOCODER_DATA_URL: "${GEOCODER_DATA_URL:-https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026/N03-20260101_56_GML.zip}"
-      GEOCODER_DB_PATH: "${GEOCODER_DB_PATH:-/app/data/admin_area.sqlite}"
-      GEOCODER_OUTPUT_CSV: "${GEOCODER_OUTPUT_CSV:-/app/output/geocoded_positions.csv}"
     volumes:
       - "${HOST_GEOCODER_DATA_DIR:-./reverse_geocoder/data}:/app/data"
       - "${HOST_GEOCODER_OUTPUT_DIR:-./reverse_geocoder/output}:/app/output"
@@ -83,13 +56,10 @@ services:
         TELOP_OUTPUT_PORT: "${TELOP_OUTPUT_PORT:-8030}"
     container_name: telop_output
     restart: unless-stopped
+    env_file:
+      - "${TELOP_OUTPUT_ENV_FILE:-./telop_output/.env}"
     ports:
       - "${TELOP_OUTPUT_PORT:-8030}:${TELOP_OUTPUT_PORT:-8030}"
-    environment:
-      HOST: "${TELOP_OUTPUT_HOST:-0.0.0.0}"
-      PORT: "${TELOP_OUTPUT_PORT:-8030}"
-      REVERSE_GEOCODER_LATEST_URL: "${REVERSE_GEOCODER_LATEST_URL:-http://reverse-geocoder:8020/api/latest}"
-      TELOP_CONFIG_PATH: "${TELOP_CONFIG_PATH:-/app/config/telop_config.json}"
     volumes:
       - "${HOST_TELOP_CONFIG_DIR:-./telop_output/config}:/app/config"
       - "${HOST_TELOP_ASSETS_DIR:-./telop_output/assets}:/app/assets"

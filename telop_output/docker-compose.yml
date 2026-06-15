@@ -1,0 +1,15 @@
+services:
+  telop-output:
+    build:
+      context: .
+      args:
+        TELOP_OUTPUT_PORT: "${PORT:-8030}"
+    container_name: telop_output
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8030}:${PORT:-8030}"
+    volumes:
+      - "./config:/app/config"
+      - "./assets:/app/assets"

@@ -1,0 +1,15 @@
+services:
+  reverse-geocoder:
+    build:
+      context: .
+      args:
+        REVERSE_GEOCODER_PORT: "${PORT:-8020}"
+    container_name: reverse_geocoder
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8020}:${PORT:-8020}"
+    volumes:
+      - "./data:/app/data"
+      - "./output:/app/output"

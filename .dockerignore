@@ -2,8 +2,8 @@
 .venv/
 __pycache__/
 *.py[cod]
-output/
+.env
+gps_receiver/output/
 reverse_geocoder/data/
 reverse_geocoder/output/
 telop_output/config/*.json
-.env

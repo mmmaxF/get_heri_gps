@@ -1,0 +1,18 @@
+services:
+  get-heri-gps:
+    build:
+      context: .
+      args:
+        APP_PORT: "${PORT:-8010}"
+    container_name: get_heri_gps
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8010}:${PORT:-8010}"
+    devices:
+      - "/dev/snd:/dev/snd"
+    group_add:
+      - "audio"
+    volumes:
+      - "./output:/app/output"

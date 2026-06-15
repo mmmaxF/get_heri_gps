@@ -2,9 +2,10 @@ __pycache__/
 *.py[cod]
 .venv/
 output/
+gps_receiver/output/
 reverse_geocoder/data/
 reverse_geocoder/output/
 telop_output/config/*.json
-input/*
-!input/.gitkeep
+gps_receiver/input/*
+!gps_receiver/input/.gitkeep
 .env

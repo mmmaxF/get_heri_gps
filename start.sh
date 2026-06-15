@@ -8,6 +8,13 @@ if [ ! -f .env ]; then
   echo ".env がなかったため .env.example から作成しました。"
 fi
 
+for service_dir in gps_receiver reverse_geocoder telop_output; do
+  if [ ! -f "${service_dir}/.env" ]; then
+    cp "${service_dir}/.env.example" "${service_dir}/.env"
+    echo "${service_dir}/.env がなかったため ${service_dir}/.env.example から作成しました。"
+  fi
+done
+
 env_value() {
   local key="$1"
   local default="$2"
@@ -21,6 +28,7 @@ env_value() {
 }
 
 APP_PORT="$(env_value APP_PORT 8010)"
+APP_PORT="$(env_value GPS_RECEIVER_PORT "${APP_PORT}")"
 APP_PUBLIC_HOST="$(env_value APP_PUBLIC_HOST 127.0.0.1)"
 REVERSE_GEOCODER_PORT="$(env_value REVERSE_GEOCODER_PORT 8020)"
 TELOP_OUTPUT_PORT="$(env_value TELOP_OUTPUT_PORT 8030)"
@@ -37,7 +45,12 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p output
+mkdir -p "$(env_value HOST_GPS_OUTPUT_DIR ./gps_receiver/output)"
+mkdir -p "$(env_value HOST_GPS_INPUT_DIR ./gps_receiver/input)"
+mkdir -p "$(env_value HOST_GEOCODER_DATA_DIR ./reverse_geocoder/data)"
+mkdir -p "$(env_value HOST_GEOCODER_OUTPUT_DIR ./reverse_geocoder/output)"
+mkdir -p "$(env_value HOST_TELOP_CONFIG_DIR ./telop_output/config)"
+mkdir -p "$(env_value HOST_TELOP_ASSETS_DIR ./telop_output/assets)"
 
 echo "get_heri_gps Dockerコンテナを作成・起動します..."
 docker compose up -d --build

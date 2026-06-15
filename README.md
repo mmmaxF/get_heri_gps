@@ -27,7 +27,7 @@ MOD内のBCD/DMSから緯度・経度・高度を抽出
 復調処理の本体は、このプロジェクト内の以下にあります。
 
 ```text
-gps_demodulator.py
+gps_receiver/gps_demodulator.py
 ```
 
 処理の流れ:
@@ -47,10 +47,11 @@ gps_demodulator.py
 実機SDIなしでRAW/captureディレクトリを復調する場合:
 
 ```bash
-python demodulate_gps.py ../audio_capture/20260613_132355 --channel 2 --limit-sec 60 --output output/demodulated_gps.csv
+cd gps_receiver
+python demodulate_gps.py ../../audio_capture/20260613_132355 --channel 2 --limit-sec 60 --output output/demodulated_gps.csv
 ```
 
-Docker内で単体復調する場合は、`input/` に `ch2.raw` と `metadata.json` を含むcaptureディレクトリ、または単体RAWを置いて実行します。
+Docker内で単体復調する場合は、`gps_receiver/input/` に `ch2.raw` と `metadata.json` を含むcaptureディレクトリ、または単体RAWを置いて実行します。
 
 ```bash
 docker compose run --rm gps-demodulator
@@ -69,6 +70,7 @@ docker compose run --rm \
 
 ```bash
 cd /home/ubuntu/app/hericheck/get_heri_gps
+cd gps_receiver
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
@@ -85,21 +87,31 @@ http://127.0.0.1:8010
 
 Docker環境では、AJAなどのALSA録音デバイスをコンテナへ渡すために `/dev/snd` をマウントします。
 
-設定値は `.env` にまとめています。初回の `./start.sh` 実行時に、`.env` がなければ `.env.example` から自動作成されます。
+設定値はコンテナごとに分けています。初回の `./start.sh` 実行時に、各 `.env` がなければ `.env.example` から自動作成されます。
+
+```text
+.env                         全体起動用のポート、マウントパス
+gps_receiver/.env            GPS取得・復調コンテナ用
+reverse_geocoder/.env        逆ジオコーダー用
+telop_output/.env            テロップ出力用
+```
 
 主な設定:
 
 ```text
-APP_PORT=8010
-INPUT_DEVICE=hw:2,0
-INPUT_CHANNELS=2
-GPS_CHANNEL=2
-SAMPLE_RATE=48000
-REVERSE_GEOCODER_PORT=8020
-TELOP_OUTPUT_PORT=8030
+.env:
+  GPS_RECEIVER_PORT=8010
+  REVERSE_GEOCODER_PORT=8020
+  TELOP_OUTPUT_PORT=8030
+
+gps_receiver/.env:
+  INPUT_DEVICE=hw:2,0
+  INPUT_CHANNELS=2
+  GPS_CHANNEL=2
+  SAMPLE_RATE=48000
 ```
 
-実機に合わせて変更する場合は、`docker-compose.yml` ではなく `.env` を編集します。
+実機に合わせて変更する場合は、`docker-compose.yml` ではなく各サービスの `.env` を編集します。
 
 簡単起動:
 
@@ -113,6 +125,23 @@ cd /home/ubuntu/app/hericheck/get_heri_gps
 ```bash
 cd /home/ubuntu/app/hericheck/get_heri_gps
 docker compose up --build
+```
+
+コンテナを別サーバへ分離する場合は、対象フォルダだけを配置して、その中の `.env` を編集して起動できます。
+
+```bash
+cd gps_receiver
+docker compose up -d --build
+```
+
+```bash
+cd reverse_geocoder
+docker compose up -d --build
+```
+
+```bash
+cd telop_output
+docker compose up -d --build
 ```
 
 バックグラウンドで起動する場合:
@@ -142,7 +171,7 @@ docker compose down
 CSVはホスト側の以下に保存されます。
 
 ```text
-./output/gps_positions.csv
+./gps_receiver/output/gps_positions.csv
 ```
 
 コンテナ内で録音デバイスを確認する場合:
@@ -151,7 +180,7 @@ CSVはホスト側の以下に保存されます。
 docker compose exec get-heri-gps arecord -l
 ```
 
-AJAやHDMI to USBキャプチャが `hw:2,0` 以外で見える場合は、`.env` の `INPUT_DEVICE` を変更してください。
+AJAやHDMI to USBキャプチャが `hw:2,0` 以外で見える場合は、`gps_receiver/.env` の `INPUT_DEVICE` を変更してください。
 
 ## 逆ジオコーディング
 
@@ -175,7 +204,7 @@ API確認:
 curl http://127.0.0.1:8020/api/health
 ```
 
-地名データの取得URLを変更する場合は、`docker-compose.yml` の `GEOCODER_DATA_URL` を変更してください。
+地名データの取得URLを変更する場合は、`reverse_geocoder/.env` の `GEOCODER_DATA_URL` を変更してください。
 
 ## テロップ出力
 
@@ -228,7 +257,7 @@ curl http://127.0.0.1:8030/api/status
 実SDI入力では、UIの `入力デバイス` プルダウンからAJAやHDMI to USBキャプチャなどの録音デバイスを選びます。
 アプリは選択デバイスから自動で `arecord` コマンドを生成します。
 プルダウンには、OSが認識しているSDI/AJA/Blackmagic系、またはHDMI to USBキャプチャ系の入力デバイスだけを表示します。
-対象キーワードを変える場合は、`docker-compose.yml` の `CAPTURE_DEVICE_INCLUDE_KEYWORDS` を変更してください。
+対象キーワードを変える場合は、`gps_receiver/.env` の `CAPTURE_DEVICE_INCLUDE_KEYWORDS` を変更してください。
 
 AJA U-TAPでは、以下のように見えます。
 
@@ -269,7 +298,7 @@ interleaved channels
 デフォルト出力:
 
 ```text
-output/gps_positions.csv
+gps_receiver/output/gps_positions.csv
 ```
 
 列:
