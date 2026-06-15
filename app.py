@@ -52,6 +52,7 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = env_int("PORT", 8010)
 DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positions.csv"))
 DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
+DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 DEFAULT_TELOP_OUTPUT_URL = os.environ.get("TELOP_OUTPUT_URL", "http://telop-output:8030")
 CAPTURE_DEVICE_INCLUDE_KEYWORDS = [
@@ -76,9 +77,9 @@ def format_japanese_time(dt):
 class RuntimeConfig:
     mode: str = "command"
     gps_channel: int = env_int("GPS_CHANNEL", 2)
-    input_channels: int = env_int("INPUT_CHANNELS", 2)
+    input_channels: int = DEFAULT_INPUT_CHANNELS
     input_device: str = DEFAULT_INPUT_DEVICE
-    input_command: str = os.environ.get("INPUT_COMMAND", "arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw")
+    input_command: str = os.environ.get("INPUT_COMMAND", f"arecord -D {DEFAULT_INPUT_DEVICE} -f S16_LE -r {SAMPLE_RATE} -c {DEFAULT_INPUT_CHANNELS} -t raw")
     test_capture_dir: str = os.environ.get("TEST_CAPTURE_DIR", "../audio_capture/20260613_132355")
     output_csv: str = str(DEFAULT_OUTPUT_CSV)
     reverse_geocoder_url: str = DEFAULT_REVERSE_GEOCODER_URL
@@ -111,6 +112,7 @@ class AppState:
             cfg = asdict(self.config)
             return {
                 "config": cfg,
+                "sample_rate": SAMPLE_RATE,
                 "running": self.running,
                 "started_at": self.started_at.isoformat() if self.started_at else None,
                 "status": self.status,

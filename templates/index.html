@@ -60,7 +60,7 @@
           <label class="device-field">
             <span>入力デバイス</span>
             <select id="input_device">
-              <option value="hw:2,0">AJA U-TAP (hw:2,0)</option>
+              <option value="">読み込み中</option>
             </select>
           </label>
           <label>
@@ -95,11 +95,11 @@
             </label>
             <label class="wide">
               <span>逆ジオコーダーURL</span>
-              <input id="reverse_geocoder_url" type="text" value="http://reverse-geocoder:8020/api/position">
+              <input id="reverse_geocoder_url" type="text" value="">
             </label>
             <label class="wide">
               <span>自動生成された入力コマンド</span>
-              <input id="input_command" type="text" value="arecord -D hw:2,0 -f S16_LE -r 48000 -c 2 -t raw">
+              <input id="input_command" type="text" value="">
             </label>
             <button id="saveBtn" type="button">設定を反映</button>
           </div>

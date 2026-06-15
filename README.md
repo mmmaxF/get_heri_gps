@@ -85,6 +85,22 @@ http://127.0.0.1:8010
 
 Docker環境では、AJAなどのALSA録音デバイスをコンテナへ渡すために `/dev/snd` をマウントします。
 
+設定値は `.env` にまとめています。初回の `./start.sh` 実行時に、`.env` がなければ `.env.example` から自動作成されます。
+
+主な設定:
+
+```text
+APP_PORT=8010
+INPUT_DEVICE=hw:2,0
+INPUT_CHANNELS=2
+GPS_CHANNEL=2
+SAMPLE_RATE=48000
+REVERSE_GEOCODER_PORT=8020
+TELOP_OUTPUT_PORT=8030
+```
+
+実機に合わせて変更する場合は、`docker-compose.yml` ではなく `.env` を編集します。
+
 簡単起動:
 
 ```bash
@@ -135,7 +151,7 @@ CSVはホスト側の以下に保存されます。
 docker compose exec get-heri-gps arecord -l
 ```
 
-AJAが `hw:2,0` 以外で見える場合は、`docker-compose.yml` の `INPUT_DEVICE` を変更してください。
+AJAやHDMI to USBキャプチャが `hw:2,0` 以外で見える場合は、`.env` の `INPUT_DEVICE` を変更してください。
 
 ## 逆ジオコーディング
 

@@ -11,6 +11,11 @@ const defaultChannelsByDevice = new Map();
 let telopConfig = null;
 let telopDrag = null;
 let pendingConfig = null;
+let sampleRate = 48000;
+
+function buildInputCommand(device, channels) {
+  return device ? `arecord -D ${device} -f S16_LE -r ${sampleRate} -c ${channels} -t raw` : "";
+}
 
 function formConfig() {
   const device = $("input_device").value;
@@ -20,7 +25,7 @@ function formConfig() {
     gps_channel: Number($("gps_channel").value),
     input_channels: channels,
     input_device: device,
-    input_command: device ? `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw` : "",
+    input_command: buildInputCommand(device, channels),
     test_capture_dir: $("test_capture_dir").value,
     output_csv: $("output_csv").value,
     reverse_geocoder_url: $("reverse_geocoder_url").value,
@@ -86,7 +91,7 @@ function placeLabel(geocode) {
 function syncCommandPreview() {
   const device = $("input_device").value;
   const channels = Number($("input_channels").value);
-  $("input_command").value = device ? `arecord -D ${device} -f S16_LE -r 48000 -c ${channels} -t raw` : "";
+  $("input_command").value = buildInputCommand(device, channels);
 }
 
 function applyDeviceDefaultChannels() {
@@ -164,6 +169,7 @@ function updateRows(recent) {
 
 function update(payload) {
   const cfg = pendingConfig || payload.config || {};
+  sampleRate = Number(payload.sample_rate || sampleRate || 48000);
   isRunning = Boolean(payload.running);
   setStatus(payload);
   setError(payload.error || "");

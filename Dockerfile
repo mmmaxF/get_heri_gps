@@ -1,4 +1,6 @@
+ARG APP_PORT=8010
 FROM python:3.12-slim
+ARG APP_PORT=8010
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -16,6 +18,6 @@ COPY . .
 
 RUN mkdir -p /app/output
 
-EXPOSE 8010
+EXPOSE ${APP_PORT}
 
 CMD ["python", "app.py"]

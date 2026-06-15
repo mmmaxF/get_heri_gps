@@ -9,14 +9,22 @@ After differential decode + invert, frames are HDLC/AX.25-like and carry
 """
 
 from dataclasses import dataclass
+import os
 
 import numpy as np
 
 
-DEFAULT_SAMPLE_RATE = 48000
-DEFAULT_BAUD = 1200
-DEFAULT_MARK_HZ = 1200
-DEFAULT_SPACE_HZ = 1800
+def env_int(name, default):
+    try:
+        return int(float(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+DEFAULT_SAMPLE_RATE = env_int("SAMPLE_RATE", 48000)
+DEFAULT_BAUD = env_int("GPS_BAUD", 1200)
+DEFAULT_MARK_HZ = env_int("GPS_MARK_HZ", 1200)
+DEFAULT_SPACE_HZ = env_int("GPS_SPACE_HZ", 1800)
 HDLC_FLAG = np.asarray([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
 
 

@@ -3,7 +3,28 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-APP_URL="http://127.0.0.1:8010"
+if [ ! -f .env ]; then
+  cp .env.example .env
+  echo ".env がなかったため .env.example から作成しました。"
+fi
+
+env_value() {
+  local key="$1"
+  local default="$2"
+  local line
+  line="$(grep -E "^${key}=" .env | tail -n 1 || true)"
+  if [ -z "${line}" ]; then
+    echo "${default}"
+  else
+    echo "${line#*=}"
+  fi
+}
+
+APP_PORT="$(env_value APP_PORT 8010)"
+APP_PUBLIC_HOST="$(env_value APP_PUBLIC_HOST 127.0.0.1)"
+REVERSE_GEOCODER_PORT="$(env_value REVERSE_GEOCODER_PORT 8020)"
+TELOP_OUTPUT_PORT="$(env_value TELOP_OUTPUT_PORT 8030)"
+APP_URL="http://${APP_PUBLIC_HOST}:${APP_PORT}"
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -28,10 +49,10 @@ echo
 echo "起動しました。"
 echo "ローカル: ${APP_URL}"
 if [ -n "${LAN_IP}" ]; then
-echo "LAN:      http://${LAN_IP}:8010"
+echo "LAN:      http://${LAN_IP}:${APP_PORT}"
 fi
-echo "逆ジオコーダーAPI: http://127.0.0.1:8020/api/health"
-echo "テロップAPI:       http://127.0.0.1:8030/api/status"
+echo "逆ジオコーダーAPI: http://127.0.0.1:${REVERSE_GEOCODER_PORT}/api/health"
+echo "テロップAPI:       http://127.0.0.1:${TELOP_OUTPUT_PORT}/api/status"
 echo
 echo "ログ確認: docker compose logs -f"
 echo "停止:     docker compose down"
