@@ -39,6 +39,14 @@ gps_receiver UI
 
 ルートの `docker-compose.yml` は3コンテナ一括起動用です。各フォルダ内の `docker-compose.yml` は、将来コンテナを別サーバへ分離するときの単独起動用です。
 
+コンテナごとの詳細な仕組みは以下にまとめています。
+
+```text
+gps_receiver/DETAILS.md
+reverse_geocoder/DETAILS.md
+telop_output/DETAILS.md
+```
+
 ## 1. GPS音声入力
 
 ### コンテナ
