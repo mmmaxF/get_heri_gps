@@ -27,6 +27,93 @@ KeyプレビューPNGを返す
 | `.env` | 待受ポート、設定ファイル、逆ジオコーダーURL、ログ設定 |
 | `README.md` | 簡易説明 |
 
+## app.pyの処理フロー
+
+### Vプレビューを作る場合
+
+```text
+gps_receiver UIからVプレビュー要求を受け取る
+/api/preview/v.png
+↓
+現在のテロップ設定を読み出す
+State.snapshot()
+↓
+reverse_geocoderから最新の地名付き位置を取得する
+get_latest_geocode()
+↓
+表示する文字列を作る
+render_text()
+↓
+フォント、文字色、縁取り、Vマット色、表示位置を反映して透明RGBA画像を作る
+render_rgba()
+↓
+黒背景に合成してV信号用のRGB画像にする
+preview_v()
+↓
+PNGとして返す
+png_response()
+```
+
+### Keyプレビューを作る場合
+
+```text
+gps_receiver UIからKeyプレビュー要求を受け取る
+/api/preview/key.png
+↓
+現在のテロップ設定を読み出す
+State.snapshot()
+↓
+reverse_geocoderから最新の地名付き位置を取得する
+get_latest_geocode()
+↓
+表示する文字列を作る
+render_text()
+↓
+Keyマット濃度を反映して透明RGBA画像を作る
+render_rgba()
+↓
+RGBA画像のalphaチャンネルだけを取り出す
+preview_key()
+↓
+alphaを白黒画像に変換する
+preview_key()
+↓
+PNGとして返す
+png_response()
+```
+
+### UI設定を保存する場合
+
+```text
+gps_receiver UIからテロップ設定を受け取る
+/api/config
+↓
+受け取った設定を現在設定へ上書きする
+deep_update()
+↓
+設定JSONとして保存する
+State.save_config()
+↓
+更新後の設定を返す
+set_config()
+```
+
+### フォント一覧を返す場合
+
+```text
+gps_receiver UIからフォント一覧要求を受け取る
+/api/fonts
+↓
+/app/assets/fonts と /usr/share/fonts を探す
+available_fonts()
+↓
+日本語表示に向いたフォントを一覧化する
+available_fonts()
+↓
+現在選ばれているフォント名も添えて返す
+get_fonts()
+```
+
 ## 入力と出力
 
 ### 入力
@@ -284,4 +371,3 @@ gps_receiver/.env
 ```
 
 現時点ではV/Keyの実出力処理は未実装です。将来追加する場合は、`render_rgba()` が返すRGBA画像をフレーム単位でSDI/DeckLink/AJA/v4l2等へ送る層を追加します。
-
