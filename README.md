@@ -252,6 +252,18 @@ MULTIVIEWER_DEDUP_TEXT=1
 
 `MULTIVIEWER_DEDUP_TEXT=1` の場合、同じ地名が連続したときは再送しません。
 
+ターミナルから手動送信する場合:
+
+```bash
+python3 send_multiviewer.py 大阪府大阪市
+```
+
+送信先やポートを一時的に変える場合:
+
+```bash
+python3 send_multiviewer.py 大阪府大阪市 --host 192.168.11.69 --port 51069
+```
+
 ## 実SDI入力
 
 実SDI入力では、UIの `入力デバイス` プルダウンからAJAやHDMI to USBキャプチャなどの録音デバイスを選びます。
