@@ -51,8 +51,11 @@ mkdir -p "$(env_value HOST_GEOCODER_DATA_DIR ./reverse_geocoder/data)"
 mkdir -p "$(env_value HOST_GEOCODER_OUTPUT_DIR ./reverse_geocoder/output)"
 mkdir -p "$(env_value HOST_GEOCODER_LOG_DIR ./reverse_geocoder/logs)"
 
-echo "get_heri_gps Dockerコンテナを作成・起動します..."
-docker compose up -d --build
+echo "既存のget_heri_gps Dockerコンテナを削除します..."
+docker compose down --remove-orphans
+
+echo "get_heri_gps Dockerコンテナを再作成・起動します..."
+docker compose up -d --build --remove-orphans
 
 echo
 docker compose ps
