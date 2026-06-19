@@ -66,24 +66,3 @@ services:
       options:
         max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
         max-file: "${DOCKER_LOG_MAX_FILE:-3}"
-
-  telop-output:
-    build:
-      context: ./telop_output
-      args:
-        TELOP_OUTPUT_PORT: "${TELOP_OUTPUT_PORT:-8030}"
-    container_name: telop_output
-    restart: unless-stopped
-    env_file:
-      - "${TELOP_OUTPUT_ENV_FILE:-./telop_output/.env}"
-    ports:
-      - "${TELOP_OUTPUT_PORT:-8030}:${TELOP_OUTPUT_PORT:-8030}"
-    volumes:
-      - "${HOST_TELOP_CONFIG_DIR:-./telop_output/config}:/app/config"
-      - "${HOST_TELOP_ASSETS_DIR:-./telop_output/assets}:/app/assets"
-      - "${HOST_TELOP_LOG_DIR:-./telop_output/logs}:/app/logs"
-    logging:
-      driver: json-file
-      options:
-        max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
-        max-file: "${DOCKER_LOG_MAX_FILE:-3}"

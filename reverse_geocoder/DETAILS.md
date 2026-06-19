@@ -1,6 +1,6 @@
 # reverse_geocoder 詳細設計
 
-`reverse_geocoder` は、`gps_receiver` から送られてきた緯度・経度を、ローカルDBで都道府県・市区町村へ変換するコンテナです。外部APIへ毎回問い合わせる方式ではなく、起動時に行政区域データからSQLite DBを作り、リアルタイム処理中はローカル検索だけで応答します。
+`reverse_geocoder` は、`gps_receiver` から送られてきた緯度・経度を、ローカルDBで都道府県・市区町村へ変換するコンテナです。変換した地名テキストは、マルチビューアーへTCPコマンドとして送信します。
 
 ## 役割
 
@@ -14,6 +14,8 @@ SQLiteの行政区域DBを検索
 geocoded_positions.csvへ保存
   ↓
 最新地名をAPIで保持
+  ↓
+マルチビューアーへ地名テキストを送信
 ```
 
 ## 主なファイル
@@ -22,6 +24,7 @@ geocoded_positions.csvへ保存
 |---|---|
 | `app.py` | FastAPI、受信API、CSV保存、最新地名保持 |
 | `geocoder.py` | 緯度・経度から行政区域ポリゴンを検索する本体 |
+| `multiviewer.py` | 地名テキストをマルチビューアーへTCP送信する |
 | `import_admin_areas.py` | 国土数値情報N03データを取得し、SQLite DBを作る |
 | `entrypoint.sh` | コンテナ起動時にDB更新を行い、アプリを起動する |
 | `.env` | DBパス、データURL、更新間隔、ログ設定 |
@@ -89,6 +92,14 @@ time,lon,lat,alt,prefecture,city,ward,address_label,admin_code
 | `GEOCODER_DATA_URL` | 国土数値情報N03 zipの取得URL |
 | `GEOCODER_UPDATE_DAYS` | 既存DBを新鮮とみなす日数 |
 | `GEOCODER_FORCE_UPDATE` | `1` なら既存DBがあっても再取得する |
+| `MULTIVIEWER_ENABLED` | マルチビューアー送信を有効にする |
+| `MULTIVIEWER_HOST` | マルチビューアーのIPアドレス |
+| `MULTIVIEWER_PORT` | マルチビューアーのTCPポート |
+| `MULTIVIEWER_COMMAND_PREFIX` | 送信コマンドの接頭辞。例: `STW010V010` |
+| `MULTIVIEWER_TEXT_TEMPLATE` | 送信する文字列テンプレート。例: `{address_label}` |
+| `MULTIVIEWER_ENCODING` | 送信文字コード。通常は `shift_jis` |
+| `MULTIVIEWER_TIMEOUT_SECONDS` | TCP接続・受信タイムアウト |
+| `MULTIVIEWER_DEDUP_TEXT` | 同じ地名の連続送信を抑止する |
 | `LOG_MAX_BYTES` / `LOG_BACKUP_COUNT` | ログローテーション設定 |
 
 ## 起動時のDB準備
@@ -195,8 +206,10 @@ WHERE min_lat <= ?
 3. `geocoder.reverse(lat, lon)` を呼ぶ。
 4. 結果に時刻、高度、送信元、チャンネルを付ける。
 5. `append_csv(row)` でCSVへ追記する。
-6. `latest` と `history` を更新する。
-7. JSONで結果を返す。
+6. `send_position(response)` でマルチビューアーへ地名テキストを送る。
+7. 送信結果を `response["multiviewer"]` に入れる。
+8. `latest` と `history` を更新する。
+9. JSONで結果を返す。
 
 ## CSV保存
 
@@ -206,9 +219,65 @@ WHERE min_lat <= ?
 
 ## 最新地名の保持
 
-`latest` は最後に受信した1件です。`telop_output` は `GET /api/latest` を呼んで、この最新地名を取得します。
+`latest` は最後に受信した1件です。`GET /api/latest` で、最新の地名付き位置とマルチビューアー送信結果を取得できます。
 
 `history` はメモリ上の直近100件です。コンテナを再起動するとメモリ上の履歴は消えますが、CSVには残ります。
+
+## マルチビューアー送信
+
+本体は `multiviewer.py` です。
+
+```text
+地名変換済みresponseを受け取る
+send_position()
+↓
+送信用テキストを作る
+render_text()
+↓
+STW010V010 + テキスト + CRLF を作る
+send_text()
+↓
+Shift_JISでエンコードする
+send_text()
+↓
+MULTIVIEWER_HOST:MULTIVIEWER_PORT へTCP接続する
+send_text()
+↓
+コマンドを送信する
+send_text()
+↓
+OKなどの応答を受け取る
+send_text()
+```
+
+デフォルトでは次のコマンドを送ります。
+
+```text
+STW010V010{address_label}\r\n
+```
+
+例:
+
+```text
+STW010V010大阪府大阪市\r\n
+```
+
+送信に成功すると、APIレスポンスに以下のような結果が入ります。
+
+```json
+{
+  "multiviewer": {
+    "enabled": true,
+    "sent": true,
+    "skipped": false,
+    "host": "192.168.11.69",
+    "port": 51069,
+    "prefix": "STW010V010",
+    "text": "大阪府大阪市",
+    "response": "OK"
+  }
+}
+```
 
 ## ログ
 
@@ -234,6 +303,9 @@ reverse_geocoder/logs/reverse_geocoder.log
 | `geocoder success` | 地名変換成功 |
 | `geocoder not_found` | 該当行政区域なし |
 | `geocoder invalid_payload` | `lat` / `lon` がない、または不正 |
+| `multiviewer sent` | マルチビューアー送信成功 |
+| `multiviewer skipped` | 無効、空文字、重複などで送信しなかった |
+| `multiviewer error` | マルチビューアー送信失敗 |
 
 ## 別サーバ化するときの注意
 
@@ -243,11 +315,6 @@ reverse_geocoder/logs/reverse_geocoder.log
 REVERSE_GEOCODER_URL=http://<reverse_geocoderサーバ>:8020/api/position
 ```
 
-`telop_output` が地名を読む場合は、`telop_output/.env` も変更します。
-
-```text
-REVERSE_GEOCODER_LATEST_URL=http://<reverse_geocoderサーバ>:8020/api/latest
-```
-
 行政区域DBはローカルファイルなので、別サーバ化しても外部APIへの常時依存はありません。ただし初回起動時や更新時は `GEOCODER_DATA_URL` へアクセスします。
 
+マルチビューアーが別セグメントにある場合は、`reverse_geocoder` を動かすサーバから `MULTIVIEWER_HOST:MULTIVIEWER_PORT` へTCP接続できる必要があります。

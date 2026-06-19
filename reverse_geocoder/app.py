@@ -14,6 +14,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from geocoder import AdminGeocoder
+from multiviewer import HOST as MULTIVIEWER_HOST
+from multiviewer import PORT as MULTIVIEWER_PORT
+from multiviewer import send_position
 
 
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -52,7 +55,14 @@ LOGGER = setup_logger()
 
 app = FastAPI(title="reverse_geocoder")
 geocoder = AdminGeocoder(DB_PATH)
-LOGGER.info("flow=geocoder init db=%s output_csv=%s area_count=%s", DB_PATH, OUTPUT_CSV, geocoder.area_count())
+LOGGER.info(
+    "flow=geocoder init db=%s output_csv=%s area_count=%s multiviewer=%s:%s",
+    DB_PATH,
+    OUTPUT_CSV,
+    geocoder.area_count(),
+    MULTIVIEWER_HOST,
+    MULTIVIEWER_PORT,
+)
 lock = threading.Lock()
 latest = None
 history = deque(maxlen=100)
@@ -121,6 +131,22 @@ async def post_position(payload: dict):
         "admin_code": response.get("admin_code", ""),
     }
     append_csv(csv_row)
+    try:
+        mv_result = send_position(response)
+        response["multiviewer"] = mv_result
+        if mv_result.get("sent"):
+            LOGGER.info(
+                "flow=multiviewer sent host=%s port=%s text=%s response=%s",
+                mv_result.get("host"),
+                mv_result.get("port"),
+                mv_result.get("text"),
+                mv_result.get("response", ""),
+            )
+        elif mv_result.get("skipped"):
+            LOGGER.info("flow=multiviewer skipped reason=%s text=%s", mv_result.get("reason"), mv_result.get("text", ""))
+    except Exception as exc:
+        response["multiviewer"] = {"enabled": True, "sent": False, "skipped": False, "error": str(exc)}
+        LOGGER.warning("flow=multiviewer error host=%s port=%s error=%s", MULTIVIEWER_HOST, MULTIVIEWER_PORT, exc)
     with lock:
         global latest
         latest = response

@@ -83,7 +83,6 @@ h2 {
 .hero,
 .setup,
 .metrics,
-.telop,
 .log {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -203,12 +202,6 @@ button.primary:hover {
   font-weight: 700;
 }
 
-#telopError {
-  color: var(--danger);
-  font-size: 13px;
-  font-weight: 700;
-}
-
 .hidden-select {
   position: absolute;
   width: 1px;
@@ -260,7 +253,7 @@ summary {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   padding: 14px;
 }
@@ -273,80 +266,6 @@ summary {
 
 .log {
   padding: 16px;
-}
-
-.telop {
-  padding: 16px;
-}
-
-.telop-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
-  gap: 12px;
-}
-
-.telop-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 14px;
-}
-
-#telopStatus {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 16px;
-}
-
-.preview-title {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-  margin-bottom: 6px;
-}
-
-.preview-stage {
-  position: relative;
-  overflow: hidden;
-  aspect-ratio: 16 / 9;
-  background: #111;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-}
-
-.preview-stage img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-#telopBox {
-  position: absolute;
-  border: 2px dashed #ffd166;
-  background: rgba(255, 209, 102, 0.08);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-  cursor: move;
-}
-
-#telopBox::after {
-  content: "";
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  right: -7px;
-  bottom: -7px;
-  border-radius: 50%;
-  background: #ffd166;
-  border: 2px solid #fff;
 }
 
 .table-wrap {
@@ -402,9 +321,7 @@ th {
   .coord-row,
   .metrics,
   .quick-grid,
-  .advanced-grid,
-  .telop-grid,
-  .preview-grid {
+  .advanced-grid {
     grid-template-columns: 1fr;
   }
 

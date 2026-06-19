@@ -1,6 +1,6 @@
 # gps_receiver 詳細設計
 
-`gps_receiver` は、SDI/HDMI/USBキャプチャから入ってくる音声を読み、指定チャンネルに載っているGPS/MOD信号を復調してCSVへ保存するコンテナです。UIの中心でもあり、逆ジオコーダーとテロップ出力コンテナへの中継も行います。
+`gps_receiver` は、SDI/HDMI/USBキャプチャから入ってくる音声を読み、指定チャンネルに載っているGPS/MOD信号を復調してCSVへ保存するコンテナです。UIの中心でもあり、逆ジオコーダーへ緯度・経度を送信します。
 
 ## 役割
 
@@ -30,7 +30,7 @@ UIへ最新状態を配信
 | `gps_demodulator.py` | PCM音声からGPS/MODを復調する本体 |
 | `demodulate_gps.py` | 保存済みRAW/captureディレクトリを単体解析するCLI |
 | `templates/index.html` | UIのHTML |
-| `static/app.js` | UIの操作、WebSocket更新、テロップ設定操作 |
+| `static/app.js` | UIの操作、WebSocket更新 |
 | `.env` | 実機ごとの入力デバイス、チャンネル、出力先など |
 
 ## 入力と出力
@@ -80,7 +80,6 @@ time,source,channel,offset_sec,lon,lat,alt,group,aircraft,payload_hex
 | `SAMPLE_RATE` | PCMサンプリング周波数。通常は `48000` |
 | `OUTPUT_CSV` | GPS CSVの保存先 |
 | `REVERSE_GEOCODER_URL` | 緯度・経度をPOSTする逆ジオコーダーAPI |
-| `TELOP_OUTPUT_URL` | テロップ出力コンテナのAPIベースURL |
 | `WINDOW_SECONDS` | 復調に使う音声バッファの保持秒数 |
 | `DECODE_INTERVAL_SECONDS` | 復調を試す間隔 |
 | `CAPTURE_DEVICE_INCLUDE_KEYWORDS` | UIに出す入力デバイス名の絞り込みキーワード |
@@ -108,15 +107,7 @@ time,source,channel,offset_sec,lon,lat,alt,group,aircraft,payload_hex
 | `GET /api/download` | GPS CSVをダウンロードする |
 | `WS /ws` | UIへ0.5秒ごとに状態を配信する |
 
-テロップ関連APIは `telop_output` へプロキシします。
-
-| API | 転送先 |
-|---|---|
-| `GET /api/telop/status` | `telop_output /api/status` |
-| `GET /api/telop/output-devices` | `telop_output /api/output-devices` |
-| `GET /api/telop/fonts` | `telop_output /api/fonts` |
-| `GET /api/telop/config` | `telop_output /api/config` |
-| `POST /api/telop/config` | `telop_output /api/config` |
+マルチビューアーへの送信は `reverse_geocoder` 側で行います。`gps_receiver` は、逆ジオコーダーから返ってきた送信結果をUIに表示します。
 
 ## 入力デバイス一覧の作り方
 
@@ -284,8 +275,6 @@ gps_receiver/logs/gps_receiver.log
 ```text
 gps_receiver/.env
   REVERSE_GEOCODER_URL=http://<reverse_geocoderサーバ>:8020/api/position
-  TELOP_OUTPUT_URL=http://<telop_outputサーバ>:8030
 ```
 
 入力デバイスを使うため、Dockerでは `/dev/snd` のマウントと音声デバイス権限が必要です。
-

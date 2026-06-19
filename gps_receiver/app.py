@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from gps_demodulator import decode_samples
@@ -56,7 +56,7 @@ DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positio
 DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
-DEFAULT_TELOP_OUTPUT_URL = os.environ.get("TELOP_OUTPUT_URL", "http://telop-output:8030")
+REVERSE_GEOCODER_TIMEOUT_SECONDS = env_float("REVERSE_GEOCODER_TIMEOUT_SECONDS", 3.0)
 LOG_DIR = Path(os.environ.get("LOG_DIR", "/app/logs"))
 LOG_FILE = os.environ.get("LOG_FILE", "gps_receiver.log")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -68,9 +68,6 @@ CAPTURE_DEVICE_INCLUDE_KEYWORDS = [
     for item in os.environ.get("CAPTURE_DEVICE_INCLUDE_KEYWORDS", "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI,MS2109,USB Audio").split(",")
     if item.strip()
 ]
-DISPLAY_OUTPUT_INCLUDE_UNKNOWN = os.environ.get("DISPLAY_OUTPUT_INCLUDE_UNKNOWN", "0").lower() in ("1", "true", "yes", "on")
-
-
 def setup_logger():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("gps_receiver")
@@ -93,7 +90,7 @@ def setup_logger():
 
 
 LOGGER = setup_logger()
-LOGGER.info("flow=gps_receiver init sample_rate=%s output_csv=%s reverse_geocoder_url=%s telop_output_url=%s", SAMPLE_RATE, DEFAULT_OUTPUT_CSV, DEFAULT_REVERSE_GEOCODER_URL, DEFAULT_TELOP_OUTPUT_URL)
+LOGGER.info("flow=gps_receiver init sample_rate=%s output_csv=%s reverse_geocoder_url=%s", SAMPLE_RATE, DEFAULT_OUTPUT_CSV, DEFAULT_REVERSE_GEOCODER_URL)
 
 
 def now_jst():
@@ -251,7 +248,7 @@ def post_reverse_geocode(config, row):
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
         LOGGER.info("flow=reverse_geocode post url=%s lat=%s lon=%s alt=%s", url, row.get("lat"), row.get("lon"), row.get("alt"))
-        with urllib.request.urlopen(req, timeout=0.8) as res:
+        with urllib.request.urlopen(req, timeout=REVERSE_GEOCODER_TIMEOUT_SECONDS) as res:
             body = res.read(8192)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         LOGGER.warning("flow=reverse_geocode error url=%s error=%s", url, exc)
@@ -270,18 +267,6 @@ def post_reverse_geocode(config, row):
     LOGGER.info("flow=reverse_geocode success address=%s lat=%s lon=%s", geocode.get("address_label", ""), row.get("lat"), row.get("lon"))
     STATE.mark_geocode_success(geocode)
     return geocode
-
-
-def telop_request(path, method="GET", payload=None, timeout=2.0):
-    url = DEFAULT_TELOP_OUTPUT_URL.rstrip("/") + path
-    data = None
-    headers = {}
-    if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as res:
-        return res.read(), res.headers.get("Content-Type", "application/octet-stream")
 
 
 class CsvWriter:
@@ -492,37 +477,6 @@ def list_capture_devices():
     return devices
 
 
-def list_display_outputs():
-    outputs = []
-    drm_root = Path("/sys/class/drm")
-    for connector in sorted(drm_root.glob("card*-*")):
-        name = connector.name
-        if "Unknown" in name and not DISPLAY_OUTPUT_INCLUDE_UNKNOWN:
-            continue
-        status_path = connector / "status"
-        if not status_path.exists():
-            continue
-        try:
-            status = status_path.read_text(encoding="utf-8").strip()
-        except OSError:
-            continue
-        if status != "connected":
-            continue
-        connector_name = name.split("-", 1)[1] if "-" in name else name
-        mode = ""
-        modes_path = connector / "modes"
-        if modes_path.exists():
-            try:
-                mode = modes_path.read_text(encoding="utf-8").splitlines()[0]
-            except (OSError, IndexError):
-                mode = ""
-        label = f"Display {connector_name}"
-        if mode:
-            label += f" ({mode})"
-        outputs.append({"id": f"display:{name}", "label": label, "kind": "display", "connector": name, "mode": mode})
-    return outputs
-
-
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
@@ -570,87 +524,6 @@ def download():
     if not path.is_absolute():
         path = BASE_DIR / path
     return FileResponse(path, filename=path.name, media_type="text/csv")
-
-
-@app.get("/api/telop/status")
-def telop_status():
-    try:
-        body, _ctype = telop_request("/api/status")
-        return JSONResponse(json.loads(body.decode("utf-8")))
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-
-
-@app.get("/api/telop/output-devices")
-def telop_output_devices():
-    try:
-        body, _ctype = telop_request("/api/output-devices")
-        payload = json.loads(body.decode("utf-8"))
-    except Exception as exc:
-        payload = {"devices": [{"id": "", "label": "未選択", "kind": "none"}], "error": str(exc)}
-    devices = payload.get("devices") or [{"id": "", "label": "未選択", "kind": "none"}]
-    seen = {item.get("id") for item in devices}
-    for item in list_display_outputs():
-        if item["id"] not in seen:
-            devices.append(item)
-    payload["devices"] = devices
-    return JSONResponse(payload)
-
-
-@app.get("/api/telop/fonts")
-def telop_fonts():
-    try:
-        body, _ctype = telop_request("/api/fonts")
-        return JSONResponse(json.loads(body.decode("utf-8")))
-    except Exception as exc:
-        return JSONResponse({"fonts": [], "error": str(exc)}, status_code=200)
-
-
-@app.get("/api/telop/config")
-def telop_config():
-    try:
-        body, _ctype = telop_request("/api/config")
-        return JSONResponse(json.loads(body.decode("utf-8")))
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-
-
-@app.post("/api/telop/config")
-async def telop_set_config(payload: dict):
-    try:
-        body, _ctype = telop_request("/api/config", method="POST", payload=payload)
-        return JSONResponse(json.loads(body.decode("utf-8")))
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-
-
-@app.post("/api/telop/start")
-def telop_start():
-    try:
-        body, _ctype = telop_request("/api/start", method="POST", payload={})
-        return JSONResponse(json.loads(body.decode("utf-8")))
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-
-
-@app.post("/api/telop/stop")
-def telop_stop():
-    try:
-        body, _ctype = telop_request("/api/stop", method="POST", payload={})
-        return JSONResponse(json.loads(body.decode("utf-8")))
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
-
-
-@app.get("/api/telop/preview/{name}.png")
-def telop_preview(name: str):
-    if name not in ("v", "key"):
-        return JSONResponse({"ok": False, "error": "unknown preview"}, status_code=404)
-    try:
-        body, ctype = telop_request(f"/api/preview/{name}.png", timeout=4.0)
-        return Response(body, media_type=ctype, headers={"Cache-Control": "no-store"})
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
 
 
 @app.websocket("/ws")
