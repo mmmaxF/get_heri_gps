@@ -180,7 +180,9 @@ gps_receiver/logs/gps_receiver.log
 reverse_geocoder/logs/reverse_geocoder.log
 ```
 
-詳しいデータフローとログの見方は `DATA_FLOW.md` を参照してください。
+詳しいデータフローとログの見方は `docs/DATA_FLOW.md` を参照してください。
+
+すべてのドキュメントは `docs/README.md` から確認できます。
 
 コンテナ内で録音デバイスを確認する場合:
 
