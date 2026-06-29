@@ -92,6 +92,27 @@ function syncCommandPreview() {
   $("input_command").value = buildInputCommand(device, channels);
 }
 
+function formatClock(date) {
+  const parts = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const values = {};
+  for (const part of parts) values[part.type] = part.value;
+  return `${values.year}/${values.month}/${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
+function updateClock() {
+  const el = $("currentClock");
+  if (el) el.textContent = `現在時刻 ${formatClock(new Date())}`;
+}
+
 function applyDeviceDefaultChannels() {
   const device = $("input_device").value;
   const channels = defaultChannelsByDevice.get(device) || 2;
@@ -231,5 +252,7 @@ $("input_device").addEventListener("change", () => {
 });
 $("input_channels").addEventListener("input", syncCommandPreview);
 
+updateClock();
+setInterval(updateClock, 1000);
 loadDevices();
 connect();

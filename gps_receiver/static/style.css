@@ -196,6 +196,13 @@ button.primary:hover {
   margin-bottom: 14px;
 }
 
+.current-clock {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 #errorText {
   color: var(--danger);
   font-size: 13px;
@@ -305,8 +312,14 @@ th {
   }
 
   .topbar,
-  .hero {
+  .hero,
+  .section-head {
     display: block;
+  }
+
+  .current-clock {
+    margin-top: 8px;
+    white-space: normal;
   }
 
   .run-pill {
