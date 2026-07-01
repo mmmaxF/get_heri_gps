@@ -12,3 +12,7 @@ telop_output/logs/
 gps_receiver/input/*
 !gps_receiver/input/.gitkeep
 .env
+
+# Vendor installers and locally extracted driver packages
+Blackmagic_Desktop_Video_Linux_*.tar
+Blackmagic_Desktop_Video_Linux_*/
