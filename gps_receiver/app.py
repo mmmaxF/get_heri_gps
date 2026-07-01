@@ -8,8 +8,10 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import queue
 import re
 import shlex
+import socket
 import subprocess
 import threading
 import time
@@ -57,6 +59,16 @@ DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 REVERSE_GEOCODER_TIMEOUT_SECONDS = env_float("REVERSE_GEOCODER_TIMEOUT_SECONDS", 3.0)
+GEOCODE_QUEUE_SIZE = env_int("GEOCODE_QUEUE_SIZE", 100)
+GEOCODE_RETRY_COUNT = env_int("GEOCODE_RETRY_COUNT", 3)
+GEOCODE_RETRY_BASE_SECONDS = env_float("GEOCODE_RETRY_BASE_SECONDS", 1.0)
+PCM_SOCKET_HOST = os.environ.get("PCM_SOCKET_HOST", "0.0.0.0")
+PCM_SOCKET_PORT = env_int("PCM_SOCKET_PORT", 9010)
+PCM_SOCKET_HEADER_MAX_BYTES = env_int("PCM_SOCKET_HEADER_MAX_BYTES", 4096)
+CAPTURE_AGENT_CONTROL_SOCKET = os.environ.get(
+    "CAPTURE_AGENT_CONTROL_SOCKET",
+    "/run/capture-agent/control.sock",
+)
 LOG_DIR = Path(os.environ.get("LOG_DIR", "/app/logs"))
 LOG_FILE = os.environ.get("LOG_FILE", "gps_receiver.log")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -105,11 +117,13 @@ def format_japanese_time(dt):
 
 @dataclass
 class RuntimeConfig:
-    mode: str = "command"
-    gps_channel: int = env_int("GPS_CHANNEL", 2)
+    mode: str = "socket"
+    gps_channel: int = env_int("GPS_CHANNEL", 4)
     input_channels: int = DEFAULT_INPUT_CHANNELS
     input_device: str = DEFAULT_INPUT_DEVICE
     input_command: str = os.environ.get("INPUT_COMMAND", f"arecord -D {DEFAULT_INPUT_DEVICE} -f S16_LE -r {SAMPLE_RATE} -c {DEFAULT_INPUT_CHANNELS} -t raw")
+    pcm_socket_host: str = PCM_SOCKET_HOST
+    pcm_socket_port: int = PCM_SOCKET_PORT
     test_capture_dir: str = os.environ.get("TEST_CAPTURE_DIR", "../audio_capture/20260613_132355")
     output_csv: str = str(DEFAULT_OUTPUT_CSV)
     reverse_geocoder_url: str = DEFAULT_REVERSE_GEOCODER_URL
@@ -130,8 +144,15 @@ class AppState:
         self.decoded_count = 0
         self.geocode_success_count = 0
         self.geocode_error_count = 0
+        self.geocode_queue_size = 0
+        self.geocode_queue_dropped_count = 0
         self.latest_geocode = None
         self.geocode_error = ""
+        self.input_status = "stopped"
+        self.input_error = ""
+        self.socket_connected = False
+        self.socket_client = ""
+        self.socket_header = None
         self.latest = None
         self.recent = deque(maxlen=30)
         self.worker = None
@@ -151,8 +172,15 @@ class AppState:
                 "decoded_count": self.decoded_count,
                 "geocode_success_count": self.geocode_success_count,
                 "geocode_error_count": self.geocode_error_count,
+                "geocode_queue_size": self.geocode_queue_size,
+                "geocode_queue_dropped_count": self.geocode_queue_dropped_count,
                 "latest_geocode": self.latest_geocode,
                 "geocode_error": self.geocode_error,
+                "input_status": self.input_status,
+                "input_error": self.input_error,
+                "socket_connected": self.socket_connected,
+                "socket_client": self.socket_client,
+                "socket_header": self.socket_header,
                 "latest": self.latest,
                 "recent": list(self.recent),
             }
@@ -196,12 +224,19 @@ class AppState:
             self.status = "running"
             self.error = ""
             self.total_samples = 0
+            self.input_status = "waiting"
+            self.input_error = ""
+            self.socket_connected = False
+            self.socket_client = ""
+            self.socket_header = None
 
     def mark_stopped(self, error=""):
         with self.lock:
             self.running = False
             self.status = "error" if error else "stopped"
             self.error = error
+            self.input_status = "error" if error else "stopped"
+            self.socket_connected = False
 
     def add_row(self, row):
         with self.lock:
@@ -217,10 +252,44 @@ class AppState:
             self.latest_geocode = geocode
             self.geocode_error = ""
 
+    def attach_geocode(self, payload_hex, geocode):
+        with self.lock:
+            if self.latest and self.latest.get("payload_hex") == payload_hex:
+                self.latest["geocode"] = geocode
+            for row in self.recent:
+                if row.get("payload_hex") == payload_hex:
+                    row["geocode"] = geocode
+                    break
+
     def mark_geocode_error(self, error):
         with self.lock:
             self.geocode_error_count += 1
             self.geocode_error = error
+
+    def set_geocode_queue_size(self, size):
+        with self.lock:
+            self.geocode_queue_size = size
+
+    def mark_geocode_queue_drop(self):
+        with self.lock:
+            self.geocode_queue_dropped_count += 1
+
+    def set_input_status(self, status, error=""):
+        with self.lock:
+            self.input_status = status
+            self.input_error = error
+
+    def set_socket_state(self, connected, client="", header=None):
+        with self.lock:
+            self.socket_connected = connected
+            self.socket_client = client
+            if header is not None:
+                self.socket_header = header
+
+    def apply_socket_header(self, header):
+        with self.lock:
+            self.config.input_channels = int(header["channels"])
+            self.config.gps_channel = int(header["gps_channel"])
 
     def set_samples(self, total_samples):
         with self.lock:
@@ -267,6 +336,101 @@ def post_reverse_geocode(config, row):
     LOGGER.info("flow=reverse_geocode success address=%s lat=%s lon=%s", geocode.get("address_label", ""), row.get("lat"), row.get("lon"))
     STATE.mark_geocode_success(geocode)
     return geocode
+
+
+def request_capture_agent(path, method="GET", payload=None):
+    data = b"" if payload is None else json.dumps(payload).encode("utf-8")
+    request = (
+        f"{method} {path} HTTP/1.0\r\n"
+        "Host: local\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {len(data)}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii") + data
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(REVERSE_GEOCODER_TIMEOUT_SECONDS)
+            client.connect(CAPTURE_AGENT_CONTROL_SOCKET)
+            client.sendall(request)
+            chunks = []
+            total = 0
+            while total < 1024 * 1024:
+                chunk = client.recv(min(65536, 1024 * 1024 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+        response = b"".join(chunks)
+        head, body = response.split(b"\r\n\r\n", 1)
+        status_code = int(head.split(b" ", 2)[1])
+    except (OSError, TimeoutError, ValueError, IndexError) as exc:
+        LOGGER.warning(
+            "flow=capture_agent proxy_error socket=%s error=%s",
+            CAPTURE_AGENT_CONTROL_SOCKET,
+            exc,
+        )
+        return JSONResponse(
+            {"ok": False, "error": f"capture-agent制御APIに接続できません: {exc}"},
+            status_code=502,
+        )
+    try:
+        result = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JSONResponse(
+            {"ok": False, "error": "capture-agentから不正な応答を受信しました"},
+            status_code=502,
+        )
+    return JSONResponse(result, status_code=status_code)
+
+
+def geocode_sender_main(config, send_queue, worker_done):
+    LOGGER.info("flow=reverse_geocode sender_start queue_size=%s retry_count=%s", GEOCODE_QUEUE_SIZE, GEOCODE_RETRY_COUNT)
+    while not worker_done.is_set() or not send_queue.empty():
+        try:
+            row = send_queue.get(timeout=0.5)
+        except queue.Empty:
+            STATE.set_geocode_queue_size(send_queue.qsize())
+            continue
+        geocode = None
+        error = ""
+        for attempt in range(1, GEOCODE_RETRY_COUNT + 1):
+            geocode = post_reverse_geocode(config, row)
+            if geocode:
+                row["geocode"] = geocode
+                STATE.attach_geocode(row.get("payload_hex", ""), geocode)
+                break
+            error = STATE.snapshot().get("geocode_error", "")
+            if attempt < GEOCODE_RETRY_COUNT and not worker_done.is_set():
+                sleep_sec = GEOCODE_RETRY_BASE_SECONDS * attempt
+                LOGGER.info("flow=reverse_geocode retry_wait attempt=%s sleep=%.2f", attempt, sleep_sec)
+                time.sleep(sleep_sec)
+        if not geocode and error:
+            LOGGER.warning("flow=reverse_geocode give_up lat=%s lon=%s error=%s", row.get("lat"), row.get("lon"), error)
+        send_queue.task_done()
+        STATE.set_geocode_queue_size(send_queue.qsize())
+    LOGGER.info("flow=reverse_geocode sender_stop")
+
+
+def enqueue_geocode(send_queue, row):
+    if not (row.get("lat") and row.get("lon")):
+        return
+    try:
+        send_queue.put_nowait(dict(row))
+    except queue.Full:
+        try:
+            dropped = send_queue.get_nowait()
+            send_queue.task_done()
+            STATE.mark_geocode_queue_drop()
+            LOGGER.warning("flow=reverse_geocode queue_full dropped lat=%s lon=%s", dropped.get("lat"), dropped.get("lon"))
+        except queue.Empty:
+            pass
+        try:
+            send_queue.put_nowait(dict(row))
+        except queue.Full:
+            STATE.mark_geocode_queue_drop()
+            LOGGER.warning("flow=reverse_geocode queue_full drop_current lat=%s lon=%s", row.get("lat"), row.get("lon"))
+            return
+    STATE.set_geocode_queue_size(send_queue.qsize())
 
 
 class CsvWriter:
@@ -352,31 +516,150 @@ def iter_command_chunks(config, stop_event):
             proc.kill()
 
 
+def recv_until_newline(conn, max_bytes):
+    data = bytearray()
+    while len(data) < max_bytes:
+        chunk = conn.recv(1)
+        if not chunk:
+            break
+        if chunk == b"\n":
+            return bytes(data)
+        data.extend(chunk)
+    if len(data) >= max_bytes:
+        raise RuntimeError("PCM socket header is too large")
+    return bytes(data)
+
+
+def iter_socket_chunks(config, stop_event):
+    host = config.pcm_socket_host or PCM_SOCKET_HOST
+    port = int(config.pcm_socket_port or PCM_SOCKET_PORT)
+    LOGGER.info(
+        "flow=input mode=socket listen=%s:%s sample_rate=%s",
+        host,
+        port,
+        SAMPLE_RATE,
+    )
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((host, port))
+        server.listen(1)
+        server.settimeout(0.5)
+        STATE.set_input_status("waiting")
+        while not stop_event.is_set():
+            try:
+                conn, addr = server.accept()
+            except socket.timeout:
+                continue
+            client = f"{addr[0]}:{addr[1]}"
+            with conn:
+                conn.settimeout(1.0)
+                header = {}
+                try:
+                    header_line = recv_until_newline(conn, PCM_SOCKET_HEADER_MAX_BYTES)
+                    if not header_line:
+                        raise RuntimeError("PCM socket header is required")
+                    header = json.loads(header_line.decode("utf-8"))
+                    if header.get("protocol") != "heri-pcm" or int(header.get("version", 0)) != 1:
+                        raise RuntimeError("unsupported PCM socket protocol")
+                    if int(header.get("sample_rate", 0)) != SAMPLE_RATE:
+                        raise RuntimeError(
+                            f"sample_rate must be {SAMPLE_RATE}: {header.get('sample_rate')}"
+                        )
+                    if header.get("sample_format") != "S16_LE":
+                        raise RuntimeError(
+                            f"sample_format must be S16_LE: {header.get('sample_format')}"
+                        )
+                    input_channels = int(header["channels"])
+                    gps_channel = int(header["gps_channel"])
+                    if input_channels < 1 or not 1 <= gps_channel <= input_channels:
+                        raise RuntimeError("invalid channels or gps_channel")
+                except (
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                    OSError,
+                    RuntimeError,
+                ) as exc:
+                    STATE.set_input_status("error", str(exc))
+                    LOGGER.warning("flow=input socket_header_error client=%s error=%s", client, exc)
+                    continue
+                STATE.apply_socket_header(header)
+                STATE.set_socket_state(True, client, header)
+                STATE.set_input_status("connected")
+                LOGGER.info("flow=input socket_connected client=%s header=%s", client, header)
+                source = f"socket://{client}"
+                start_time = now_jst()
+                chunk_frames = int(SAMPLE_RATE * 0.25)
+                bytes_per_frame = input_channels * 2
+                bytes_per_chunk = chunk_frames * bytes_per_frame
+                buffer = bytearray()
+                try:
+                    while not stop_event.is_set():
+                        chunk = conn.recv(bytes_per_chunk - len(buffer))
+                        if not chunk:
+                            break
+                        buffer.extend(chunk)
+                        if len(buffer) < bytes_per_chunk:
+                            continue
+                        data = bytes(buffer[:bytes_per_chunk])
+                        del buffer[:bytes_per_chunk]
+                        arr = np.frombuffer(data, dtype="<i2")
+                        frames = len(arr) // input_channels
+                        if frames <= 0:
+                            continue
+                        arr = arr[: frames * input_channels].reshape(-1, input_channels)
+                        ch_index = gps_channel - 1
+                        yield arr[:, ch_index].copy(), source, start_time
+                except socket.timeout:
+                    LOGGER.warning("flow=input socket_timeout client=%s", client)
+                finally:
+                    STATE.set_socket_state(False, "", header)
+                    if not stop_event.is_set():
+                        STATE.set_input_status("waiting")
+                    LOGGER.info("flow=input socket_disconnected client=%s", client)
+
+
 def worker_main():
     STATE.mark_started()
     config = STATE.config
-    if not config.mode:
-        config.mode = "command"
+    config.mode = "socket"
     writer = CsvWriter(config.output_csv)
+    geocode_queue = queue.Queue(maxsize=GEOCODE_QUEUE_SIZE)
+    geocode_done = threading.Event()
+    geocode_thread = threading.Thread(target=geocode_sender_main, args=(config, geocode_queue, geocode_done), daemon=True)
+    geocode_thread.start()
     sample_buffer = np.empty(0, dtype=np.int16)
     buffer_start_sample = 0
     next_decode = time.monotonic() + config.decode_interval_seconds
     seen = set()
     total_samples = 0
+    active_source_start = None
     last_progress = time.monotonic()
     LOGGER.info(
-        "flow=worker start mode=%s input_device=%s gps_channel=%s input_channels=%s output_csv=%s",
-        config.mode,
-        config.input_device,
-        config.gps_channel,
-        config.input_channels,
+        "flow=worker start mode=socket listen=%s:%s output_csv=%s",
+        config.pcm_socket_host,
+        config.pcm_socket_port,
         config.output_csv,
     )
     try:
-        source_iter = iter_test_chunks(config, STATE.stop_event) if config.mode == "test" else iter_command_chunks(config, STATE.stop_event)
+        source_iter = iter_socket_chunks(config, STATE.stop_event)
         source_name = ""
         source_start = now_jst()
         for chunk, source_name, source_start in source_iter:
+            if source_start != active_source_start:
+                active_source_start = source_start
+                sample_buffer = np.empty(0, dtype=np.int16)
+                buffer_start_sample = 0
+                seen.clear()
+                next_decode = time.monotonic() + config.decode_interval_seconds
+                LOGGER.info(
+                    "flow=input new_stream source=%s channels=%s gps_channel=%s",
+                    source_name,
+                    config.input_channels,
+                    config.gps_channel,
+                )
             total_samples += len(chunk)
             STATE.set_samples(total_samples)
             sample_buffer = np.concatenate([sample_buffer, chunk])
@@ -432,11 +715,9 @@ def worker_main():
                     row["aircraft"],
                     offset_sec,
                 )
-                geocode = post_reverse_geocode(config, row)
-                if geocode:
-                    row["geocode"] = geocode
                 writer.write(row)
                 STATE.add_row(row)
+                enqueue_geocode(geocode_queue, row)
     except Exception as exc:
         LOGGER.exception("flow=worker error error=%s", exc)
         STATE.mark_stopped(str(exc))
@@ -444,11 +725,31 @@ def worker_main():
         LOGGER.info("flow=worker stop reason=completed total_samples=%s decoded_count=%s", total_samples, STATE.decoded_count)
         STATE.mark_stopped()
     finally:
+        geocode_done.set()
+        geocode_thread.join(timeout=5)
         writer.close()
 
 
 app = FastAPI(title="get_heri_gps")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.on_event("startup")
+def start_pcm_receiver():
+    with STATE.lock:
+        if STATE.running:
+            return
+        STATE.stop_event.clear()
+        STATE.worker = threading.Thread(target=worker_main, daemon=True)
+        STATE.worker.start()
+
+
+@app.on_event("shutdown")
+def stop_pcm_receiver():
+    STATE.stop_event.set()
+    worker = STATE.worker
+    if worker and worker.is_alive():
+        worker.join(timeout=3)
 
 
 def build_arecord_command(device, channels):
@@ -485,6 +786,119 @@ def index():
 @app.get("/api/status")
 def status():
     return JSONResponse(STATE.snapshot())
+
+
+@app.get("/api/system/status")
+def system_status():
+    receiver = STATE.snapshot()
+    capture_response = request_capture_agent("/api/status")
+    try:
+        capture_body = json.loads(capture_response.body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        capture_body = {}
+
+    reverse_position_url = receiver["config"].get("reverse_geocoder_url", "")
+    reverse_health_url = reverse_position_url.replace("/api/position", "/api/health")
+    reverse_latest_url = reverse_position_url.replace("/api/position", "/api/latest")
+    reverse_body = {}
+    reverse_latest = {}
+    reverse_error = ""
+    try:
+        with urllib.request.urlopen(reverse_health_url, timeout=2.0) as response:
+            reverse_body = json.loads(response.read(65536).decode("utf-8"))
+        with urllib.request.urlopen(reverse_latest_url, timeout=2.0) as response:
+            reverse_latest = json.loads(response.read(65536).decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        reverse_error = str(exc)
+
+    capture_config = capture_body.get("config", {})
+    capture_logs = capture_body.get("logs", [])
+    latest_fix = receiver.get("latest") or {}
+    latest_multiviewer = reverse_latest.get("multiviewer") or {}
+    return {
+        "gps_receiver": {
+            "ok": bool(receiver["running"]),
+            "status": receiver["status"],
+            "input_status": receiver["input_status"],
+            "input": {
+                "connected": receiver["socket_connected"],
+                "client": receiver["socket_client"],
+                "sample_rate": receiver["sample_rate"],
+                "channels": receiver["config"].get("input_channels"),
+                "gps_channel": receiver["config"].get("gps_channel"),
+                "total_samples": receiver["total_samples"],
+            },
+            "output": {
+                "decoded_count": receiver["decoded_count"],
+                "latest_time": latest_fix.get("time", ""),
+                "lat": latest_fix.get("lat", ""),
+                "lon": latest_fix.get("lon", ""),
+                "alt": latest_fix.get("alt", ""),
+                "csv": receiver["config"].get("output_csv", ""),
+                "geocode_queue": receiver["geocode_queue_size"],
+            },
+        },
+        "capture_agent": {
+            "ok": capture_response.status_code == 200,
+            "running": bool(capture_body.get("running")),
+            "error": capture_body.get("error", ""),
+            "pid": capture_body.get("pid"),
+            "input": {
+                "device": capture_config.get("CAPTURE_DEVICE", ""),
+                "sample_rate": capture_config.get("SAMPLE_RATE", ""),
+                "sample_format": capture_config.get("SAMPLE_FORMAT", ""),
+                "channels": capture_config.get("INPUT_CHANNELS", ""),
+                "gps_channel": capture_config.get("GPS_CHANNEL", ""),
+            },
+            "output": {
+                "host": capture_config.get("GPS_RECEIVER_HOST", ""),
+                "port": capture_config.get("GPS_RECEIVER_PCM_PORT", ""),
+                "last_log": capture_logs[-1] if capture_logs else "",
+            },
+        },
+        "reverse_geocoder": {
+            "ok": bool(reverse_body.get("ok")),
+            "db_loaded": bool(reverse_body.get("db_loaded")),
+            "area_count": reverse_body.get("area_count", 0),
+            "error": reverse_error,
+            "input": {
+                "time": reverse_latest.get("time", ""),
+                "lat": reverse_latest.get("lat", ""),
+                "lon": reverse_latest.get("lon", ""),
+            },
+            "output": {
+                "address": reverse_latest.get("address_label", ""),
+                "admin_code": reverse_latest.get("admin_code", ""),
+                "multiviewer_sent": latest_multiviewer.get("sent"),
+                "multiviewer_error": latest_multiviewer.get("error", ""),
+            },
+        },
+    }
+
+
+@app.get("/api/capture-agent/status")
+def capture_agent_status():
+    return request_capture_agent("/api/status")
+
+
+@app.get("/api/capture-agent/devices")
+def capture_agent_devices():
+    return request_capture_agent("/api/devices")
+
+
+@app.post("/api/capture-agent/config")
+def capture_agent_config(payload: dict):
+    return request_capture_agent("/api/config", method="POST", payload=payload)
+
+
+@app.post("/api/capture-agent/start")
+def capture_agent_start():
+    return request_capture_agent("/api/start", method="POST", payload={})
+
+
+@app.post("/api/capture-agent/stop")
+def capture_agent_stop():
+    return request_capture_agent("/api/stop", method="POST", payload={})
 
 
 @app.get("/api/devices")

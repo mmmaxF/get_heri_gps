@@ -82,6 +82,7 @@ h2 {
 
 .hero,
 .setup,
+.system-status,
 .metrics,
 .log {
   background: var(--panel);
@@ -188,6 +189,101 @@ button.primary:hover {
   padding: 16px;
 }
 
+.system-status {
+  padding: 16px;
+}
+
+#systemCheckedAt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.service-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.service-card {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfc;
+  overflow: hidden;
+}
+
+.service-card-head {
+  border-right: 1px solid var(--line);
+  background: var(--soft);
+  padding: 14px;
+}
+
+.service-card-head span,
+.service-card-head strong,
+.service-card-head em {
+  display: block;
+}
+
+.service-card-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.service-card-head strong {
+  margin: 3px 0 8px;
+  font-size: 15px;
+}
+
+.service-card-head em {
+  color: var(--muted);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.service-card-head em.ok {
+  color: var(--accent);
+}
+
+.service-card-head em.error {
+  color: var(--danger);
+}
+
+.service-grid dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+  align-content: center;
+  margin: 0;
+  padding: 12px 14px 12px 0;
+  font-size: 12px;
+}
+
+.service-grid dl > div {
+  min-width: 0;
+}
+
+.service-grid dl > div.wide-detail {
+  grid-column: 1 / -1;
+}
+
+.service-grid dt {
+  margin-bottom: 2px;
+  color: var(--muted);
+}
+
+.service-grid dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .section-head {
   display: flex;
   align-items: center;
@@ -222,6 +318,95 @@ button.primary:hover {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) 180px;
   gap: 12px;
+}
+
+.pcm-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pcm-summary > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfc;
+}
+
+.pcm-summary span,
+.pcm-summary strong {
+  display: block;
+}
+
+.pcm-summary span {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pcm-summary strong {
+  overflow-wrap: anywhere;
+}
+
+.capture-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 150px 180px;
+  gap: 12px;
+  align-items: end;
+}
+
+.destination-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 160px auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.capture-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.capture-actions button {
+  white-space: nowrap;
+}
+
+.icon-button {
+  width: 42px;
+  padding: 0;
+  font-size: 21px;
+}
+
+.agent-advanced-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 128px;
+  gap: 12px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.agent-state {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: 13px;
+  border-top: 1px solid var(--line);
+  padding-top: 11px;
+  font-size: 13px;
+}
+
+.agent-state span {
+  color: var(--muted);
+}
+
+#agentLog {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 label {
@@ -333,9 +518,42 @@ th {
 
   .coord-row,
   .metrics,
+  .service-grid,
   .quick-grid,
-  .advanced-grid {
+  .advanced-grid,
+  .capture-grid,
+  .destination-grid,
+  .agent-advanced-grid {
     grid-template-columns: 1fr;
   }
 
+  .service-card {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .service-card-head {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .service-grid dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px 14px;
+  }
+
+  .capture-actions button {
+    flex: 1;
+  }
+
+}
+
+@media (max-width: 520px) {
+  .service-grid dl {
+    grid-template-columns: 1fr;
+  }
+
+  .service-grid dl > div.wide-detail {
+    grid-column: auto;
+  }
 }

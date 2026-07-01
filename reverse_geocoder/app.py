@@ -5,6 +5,7 @@ import csv
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import queue
 import threading
 from collections import deque
 from pathlib import Path
@@ -14,9 +15,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from geocoder import AdminGeocoder
-from multiviewer import HOST as MULTIVIEWER_HOST
-from multiviewer import PORT as MULTIVIEWER_PORT
-from multiviewer import send_position
+from outputs import OutputManager
 
 
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -28,6 +27,7 @@ LOG_FILE = os.environ.get("LOG_FILE", "reverse_geocoder.log")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = int(float(os.environ.get("LOG_MAX_BYTES", 5 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(float(os.environ.get("LOG_BACKUP_COUNT", 5)))
+OUTPUT_QUEUE_SIZE = int(float(os.environ.get("OUTPUT_QUEUE_SIZE", 10)))
 
 
 def setup_logger():
@@ -55,17 +55,18 @@ LOGGER = setup_logger()
 
 app = FastAPI(title="reverse_geocoder")
 geocoder = AdminGeocoder(DB_PATH)
+outputs = OutputManager()
 LOGGER.info(
-    "flow=geocoder init db=%s output_csv=%s area_count=%s multiviewer=%s:%s",
+    "flow=geocoder init db=%s output_csv=%s area_count=%s output_adapters=%s",
     DB_PATH,
     OUTPUT_CSV,
     geocoder.area_count(),
-    MULTIVIEWER_HOST,
-    MULTIVIEWER_PORT,
+    ",".join(outputs.names()) or "none",
 )
 lock = threading.Lock()
 latest = None
 history = deque(maxlen=100)
+output_queue = queue.Queue(maxsize=OUTPUT_QUEUE_SIZE)
 
 
 CSV_HEADER = ["time", "lon", "lat", "alt", "prefecture", "city", "ward", "address_label", "admin_code"]
@@ -80,6 +81,45 @@ def append_csv(row):
             w.writerow(CSV_HEADER)
         w.writerow([row.get(k, "") for k in CSV_HEADER])
     LOGGER.info("flow=geocoder csv_write path=%s time=%s address=%s lat=%s lon=%s", OUTPUT_CSV, row.get("time"), row.get("address_label"), row.get("lat"), row.get("lon"))
+
+
+def output_worker():
+    while True:
+        response = output_queue.get()
+        try:
+            output_results = outputs.send_all(response)
+            with lock:
+                response["outputs"] = output_results
+                for result in output_results:
+                    if result.get("name") == "multiviewer":
+                        response["multiviewer"] = result
+            for result in output_results:
+                if result.get("sent"):
+                    LOGGER.info("flow=output sent name=%s text=%s", result.get("name"), result.get("text", ""))
+                elif result.get("skipped"):
+                    LOGGER.info("flow=output skipped name=%s reason=%s text=%s", result.get("name"), result.get("reason", ""), result.get("text", ""))
+                elif result.get("error"):
+                    LOGGER.warning("flow=output error name=%s error=%s", result.get("name"), result.get("error"))
+        except Exception:
+            LOGGER.exception("flow=output worker_error")
+        finally:
+            output_queue.task_done()
+
+
+def enqueue_output(response):
+    try:
+        output_queue.put_nowait(response)
+    except queue.Full:
+        try:
+            output_queue.get_nowait()
+            output_queue.task_done()
+        except queue.Empty:
+            pass
+        output_queue.put_nowait(response)
+        LOGGER.warning("flow=output queue_full dropped_oldest size=%s", OUTPUT_QUEUE_SIZE)
+
+
+threading.Thread(target=output_worker, daemon=True).start()
 
 
 @app.get("/api/health")
@@ -131,26 +171,15 @@ async def post_position(payload: dict):
         "admin_code": response.get("admin_code", ""),
     }
     append_csv(csv_row)
-    try:
-        mv_result = send_position(response)
-        response["multiviewer"] = mv_result
-        if mv_result.get("sent"):
-            LOGGER.info(
-                "flow=multiviewer sent host=%s port=%s text=%s response=%s",
-                mv_result.get("host"),
-                mv_result.get("port"),
-                mv_result.get("text"),
-                mv_result.get("response", ""),
-            )
-        elif mv_result.get("skipped"):
-            LOGGER.info("flow=multiviewer skipped reason=%s text=%s", mv_result.get("reason"), mv_result.get("text", ""))
-    except Exception as exc:
-        response["multiviewer"] = {"enabled": True, "sent": False, "skipped": False, "error": str(exc)}
-        LOGGER.warning("flow=multiviewer error host=%s port=%s error=%s", MULTIVIEWER_HOST, MULTIVIEWER_PORT, exc)
+    response["outputs"] = [
+        {"name": name, "queued": True}
+        for name in outputs.names()
+    ]
     with lock:
         global latest
         latest = response
         history.appendleft(response)
+    enqueue_output(response)
     if response.get("ok"):
         LOGGER.info("flow=geocoder success address=%s lat=%.8f lon=%.8f", response.get("address_label", ""), lat, lon)
     else:

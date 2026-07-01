@@ -40,88 +40,126 @@
           <div class="latest-time" id="latestTime">まだ受信していません</div>
         </div>
         <div class="actions">
-          <button id="startBtn" class="primary">開始</button>
-          <button id="stopBtn">停止</button>
           <a class="button" href="/api/download">CSVを開く</a>
         </div>
       </section>
 
       <section class="setup">
         <div class="section-head">
-          <h2>入力設定</h2>
+          <h2>音声キャプチャ設定</h2>
           <span id="errorText"></span>
         </div>
 
-        <select id="mode" class="hidden-select">
-          <option value="command" selected>command</option>
-        </select>
-
-        <div class="quick-grid">
-          <label class="device-field">
-            <span>入力デバイス</span>
-            <select id="input_device">
-              <option value="">読み込み中</option>
+        <div class="capture-grid">
+          <label class="device-control">
+            <span>音声入力デバイス</span>
+            <select id="agentDevice">
+              <option value="">デバイスを確認中</option>
+            </select>
+          </label>
+          <label>
+            <span>入力チャンネル数</span>
+            <select id="agentChannels">
+              <option value="1">1ch</option>
+              <option value="2">2ch</option>
+              <option value="4" selected>4ch</option>
+              <option value="8">8ch</option>
+              <option value="16">16ch</option>
             </select>
           </label>
           <label>
             <span>GPS音声チャンネル</span>
-            <select id="gps_channel">
+            <select id="agentGpsChannel">
               <option value="1">CH1</option>
-              <option value="2" selected>CH2</option>
+              <option value="2">CH2</option>
               <option value="3">CH3</option>
-              <option value="4">CH4</option>
-              <option value="5">CH5</option>
-              <option value="6">CH6</option>
-              <option value="7">CH7</option>
-              <option value="8">CH8</option>
+              <option value="4" selected>CH4</option>
             </select>
           </label>
         </div>
 
+        <div class="destination-grid">
+          <label>
+            <span>PCM送信先（ホスト名・IPアドレス）</span>
+            <input id="agentReceiverHost" type="text" value="127.0.0.1" placeholder="例: 192.168.11.67">
+          </label>
+          <label>
+            <span>送信先ポート</span>
+            <input id="agentReceiverPort" type="number" min="1" max="65535" value="9010">
+          </label>
+          <div class="capture-actions">
+            <button id="agentStartBtn" class="primary" type="button">音声送信を開始</button>
+            <button id="agentStopBtn" type="button">停止</button>
+            <button id="agentRefreshBtn" class="icon-button" type="button" title="デバイス一覧を更新" aria-label="デバイス一覧を更新">↻</button>
+          </div>
+        </div>
+
         <details class="advanced">
           <summary>詳細設定</summary>
-          <div class="advanced-grid">
+          <div class="agent-advanced-grid">
             <label>
-              <span>入力チャンネル数</span>
-              <input id="input_channels" type="number" min="1" max="16" value="2">
+              <span>サンプリング周波数</span>
+              <input id="agentSampleRate" type="number" value="48000">
             </label>
-            <label class="wide">
-              <span>テスト用RAWディレクトリ</span>
-              <input id="test_capture_dir" type="text" value="../audio_capture/20260613_132355">
-            </label>
-            <label class="wide">
-              <span>CSV保存先</span>
-              <input id="output_csv" type="text" value="./output/gps_positions.csv">
-            </label>
-            <label class="wide">
-              <span>逆ジオコーダーURL</span>
-              <input id="reverse_geocoder_url" type="text" value="">
-            </label>
-            <label class="wide">
-              <span>自動生成された入力コマンド</span>
-              <input id="input_command" type="text" value="">
-            </label>
-            <button id="saveBtn" type="button">設定を反映</button>
+            <button id="agentSaveBtn" type="button">設定を保存</button>
           </div>
         </details>
+        <div class="agent-state">
+          <span>capture-agent</span>
+          <strong id="agentStatus">接続確認中</strong>
+          <span id="agentLog"></span>
+        </div>
+      </section>
+
+      <section class="system-status">
+        <div class="section-head">
+          <h2>システム状態</h2>
+          <span id="systemCheckedAt">確認中</span>
+        </div>
+        <div class="service-grid">
+          <div class="service-card">
+            <div class="service-card-head">
+              <span>ホストプロセス</span>
+              <strong>キャプチャエージェント</strong>
+              <em id="captureServiceStatus">確認中</em>
+            </div>
+            <dl id="captureServiceDetails"></dl>
+          </div>
+          <div class="service-card">
+            <div class="service-card-head">
+              <span>Dockerコンテナ</span>
+              <strong>get-heri-gps</strong>
+              <em id="receiverServiceStatus">確認中</em>
+            </div>
+            <dl id="receiverServiceDetails"></dl>
+          </div>
+          <div class="service-card">
+            <div class="service-card-head">
+              <span>Dockerコンテナ</span>
+              <strong>reverse-geocoder</strong>
+              <em id="geocoderServiceStatus">確認中</em>
+            </div>
+            <dl id="geocoderServiceDetails"></dl>
+          </div>
+        </div>
       </section>
 
       <section class="metrics">
+        <div>
+          <span>GPS入力</span>
+          <strong id="inputStatus">停止中</strong>
+        </div>
         <div>
           <span>取得件数</span>
           <strong id="decoded">0</strong>
         </div>
         <div>
           <span>選択CH</span>
-          <strong id="channel">CH2</strong>
+          <strong id="channel">CH4</strong>
         </div>
         <div>
           <span>入力サンプル</span>
           <strong id="samples">0</strong>
-        </div>
-        <div>
-          <span>CSV</span>
-          <strong id="csvPath">./output/gps_positions.csv</strong>
         </div>
         <div>
           <span>地名変換</span>
@@ -130,6 +168,10 @@
         <div>
           <span>MV送信</span>
           <strong id="multiviewerStatus">待機中</strong>
+        </div>
+        <div>
+          <span>CSV</span>
+          <strong id="csvPath">./output/gps_positions.csv</strong>
         </div>
       </section>
 
@@ -157,6 +199,6 @@
         </div>
       </section>
     </main>
-    <script src="/static/app.js?v=20260623-clock"></script>
+    <script src="/static/app.js?v=20260701-system-status-v3"></script>
   </body>
 </html>
