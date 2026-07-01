@@ -365,6 +365,6 @@ $("agentStopBtn").addEventListener("click", async () => {
 updateClock();
 setInterval(updateClock, 1000);
 connect();
-setInterval(refreshAgentStatus, 1000);
+setInterval(refreshAgentStatus, 2000);
 refreshSystemStatus();
 setInterval(refreshSystemStatus, 3000);

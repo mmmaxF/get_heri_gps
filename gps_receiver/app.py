@@ -252,6 +252,11 @@ class AppState:
             self.latest_geocode = geocode
             self.geocode_error = ""
 
+    def mark_geocode_not_found(self, geocode):
+        with self.lock:
+            self.latest_geocode = geocode
+            self.geocode_error = ""
+
     def attach_geocode(self, payload_hex, geocode):
         with self.lock:
             if self.latest and self.latest.get("payload_hex") == payload_hex:
@@ -331,8 +336,11 @@ def post_reverse_geocode(config, row):
         return None
     if geocode.get("ok") is False:
         LOGGER.warning("flow=reverse_geocode not_found lat=%s lon=%s error=%s", row.get("lat"), row.get("lon"), geocode.get("error", "reverse geocoder error"))
-        STATE.mark_geocode_error(str(geocode.get("error", "reverse geocoder error")))
-        return None
+        # A valid HTTP/JSON response with no matching administrative area is
+        # final, not a transport failure. Attach it to the current position so
+        # the UI clears any older place name, and do not retry it.
+        STATE.mark_geocode_not_found(geocode)
+        return geocode
     LOGGER.info("flow=reverse_geocode success address=%s lat=%s lon=%s", geocode.get("address_label", ""), row.get("lat"), row.get("lon"))
     STATE.mark_geocode_success(geocode)
     return geocode
@@ -348,19 +356,27 @@ def request_capture_agent(path, method="GET", payload=None):
         "Connection: close\r\n\r\n"
     ).encode("ascii") + data
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(REVERSE_GEOCODER_TIMEOUT_SECONDS)
-            client.connect(CAPTURE_AGENT_CONTROL_SOCKET)
-            client.sendall(request)
-            chunks = []
-            total = 0
-            while total < 1024 * 1024:
-                chunk = client.recv(min(65536, 1024 * 1024 - total))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                total += len(chunk)
-        response = b"".join(chunks)
+        response = b""
+        for attempt in range(3):
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                    client.settimeout(REVERSE_GEOCODER_TIMEOUT_SECONDS)
+                    client.connect(CAPTURE_AGENT_CONTROL_SOCKET)
+                    client.sendall(request)
+                    chunks = []
+                    total = 0
+                    while total < 1024 * 1024:
+                        chunk = client.recv(min(65536, 1024 * 1024 - total))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        total += len(chunk)
+                response = b"".join(chunks)
+                break
+            except (OSError, TimeoutError):
+                if attempt == 2:
+                    raise
+                time.sleep(0.05)
         head, body = response.split(b"\r\n\r\n", 1)
         status_code = int(head.split(b" ", 2)[1])
     except (OSError, TimeoutError, ValueError, IndexError) as exc:
@@ -395,7 +411,7 @@ def geocode_sender_main(config, send_queue, worker_done):
         error = ""
         for attempt in range(1, GEOCODE_RETRY_COUNT + 1):
             geocode = post_reverse_geocode(config, row)
-            if geocode:
+            if geocode is not None:
                 row["geocode"] = geocode
                 STATE.attach_geocode(row.get("payload_hex", ""), geocode)
                 break
@@ -414,6 +430,20 @@ def geocode_sender_main(config, send_queue, worker_done):
 def enqueue_geocode(send_queue, row):
     if not (row.get("lat") and row.get("lon")):
         return
+    # Place-name display is real-time data. Discard every pending older
+    # position before enqueueing the newest fix instead of building a backlog.
+    while True:
+        try:
+            dropped = send_queue.get_nowait()
+            send_queue.task_done()
+            STATE.mark_geocode_queue_drop()
+            LOGGER.info(
+                "flow=reverse_geocode superseded lat=%s lon=%s",
+                dropped.get("lat"),
+                dropped.get("lon"),
+            )
+        except queue.Empty:
+            break
     try:
         send_queue.put_nowait(dict(row))
     except queue.Full:

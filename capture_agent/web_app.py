@@ -250,6 +250,7 @@ class ThreadingUnixHTTPServer(
     socketserver.UnixStreamServer,
 ):
     daemon_threads = True
+    request_queue_size = 128
 
 
 class RequestHandler(BaseHTTPRequestHandler):
