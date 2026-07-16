@@ -199,3 +199,16 @@ metadata INSERT
 | `source/*.zip` | 取得したN03 ZIP |
 
 これらにPK、FK、index、transactionはありません。
+
+GPS位置CSVと地名付きCSVはJSTの日付変更時にローテーションします。
+現在日のファイル名は従来どおりで、前日分は日付付き名称へ移動します。
+
+```text
+gps_positions.csv
+gps_positions.2026-07-01.csv
+geocoded_positions.csv
+geocoded_positions.2026-07-01.csv
+```
+
+日付付きアーカイブは `CSV_RETENTION_DAYS`（既定90日）を超えると、
+次のローテーション時に削除されます。`0`以下を指定した場合は自動削除しません。

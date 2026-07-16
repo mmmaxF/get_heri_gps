@@ -167,6 +167,7 @@ flowchart LR
 | `GPS_CHANNEL` | `2` | GPSを含むチャンネル、1始まり |
 | `CAPTURE_DEVICE_INCLUDE_KEYWORDS` | `AJA,...,USB Audio` | UIに表示するデバイス名フィルタ |
 | `OUTPUT_CSV` | `/app/output/gps_positions.csv` | GPS CSV |
+| `CSV_RETENTION_DAYS` | `90` | 日次CSVアーカイブの保持日数 |
 | `WINDOW_SECONDS` | `20.0` | 復調バッファ保持秒数 |
 | `DECODE_INTERVAL_SECONDS` | `1.0` | 復調実行間隔 |
 | `REVERSE_GEOCODER_URL` | `http://reverse-geocoder:8020/api/position` | 地名変換先 |
@@ -195,6 +196,7 @@ flowchart LR
 | `GEOCODER_DATA_URL` | N03 ZIP URL | 行政区域データ取得元 |
 | `GEOCODER_DB_PATH` | `/app/data/admin_area.sqlite` | SQLite DB |
 | `GEOCODER_OUTPUT_CSV` | `/app/output/geocoded_positions.csv` | 地名CSV |
+| `CSV_RETENTION_DAYS` | `90` | 日次CSVアーカイブの保持日数 |
 | `MULTIVIEWER_ENABLED` | `1` | MV送信有効化 |
 | `MULTIVIEWER_HOST` | `192.168.11.69` | MV送信先 |
 | `MULTIVIEWER_PORT` | `51069` | MV TCP port |

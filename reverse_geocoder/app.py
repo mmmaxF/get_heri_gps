@@ -6,8 +6,10 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 import queue
+import re
 import threading
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import uvicorn
@@ -28,6 +30,8 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = int(float(os.environ.get("LOG_MAX_BYTES", 5 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(float(os.environ.get("LOG_BACKUP_COUNT", 5)))
 OUTPUT_QUEUE_SIZE = int(float(os.environ.get("OUTPUT_QUEUE_SIZE", 10)))
+CSV_RETENTION_DAYS = int(float(os.environ.get("CSV_RETENTION_DAYS", 90)))
+JST = timezone(timedelta(hours=9))
 
 
 def setup_logger():
@@ -72,14 +76,93 @@ output_queue = queue.Queue(maxsize=OUTPUT_QUEUE_SIZE)
 CSV_HEADER = ["time", "lon", "lat", "alt", "prefecture", "city", "ward", "address_label", "admin_code"]
 
 
+class DailyCsvAppender:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.Lock()
+        self.active_day = (
+            datetime.fromtimestamp(self.path.stat().st_mtime, JST).date()
+            if self.path.exists() and self.path.stat().st_size > 0
+            else None
+        )
+        self._cleanup(datetime.now(JST).date())
+
+    def _row_day(self, row):
+        try:
+            return datetime.strptime(
+                str(row.get("time", ""))[:10],
+                "%Y/%m/%d",
+            ).date()
+        except ValueError:
+            return datetime.now(JST).date()
+
+    def _archive_path(self, day):
+        base = self.path.with_name(
+            f"{self.path.stem}.{day.isoformat()}{self.path.suffix}"
+        )
+        candidate = base
+        index = 1
+        while candidate.exists():
+            candidate = self.path.with_name(
+                f"{self.path.stem}.{day.isoformat()}.{index}{self.path.suffix}"
+            )
+            index += 1
+        return candidate
+
+    def _cleanup(self, current_day):
+        if CSV_RETENTION_DAYS <= 0:
+            return
+        cutoff = current_day - timedelta(days=CSV_RETENTION_DAYS)
+        pattern = re.compile(
+            rf"^{re.escape(self.path.stem)}\.(\d{{4}}-\d{{2}}-\d{{2}})(?:\.\d+)?{re.escape(self.path.suffix)}$"
+        )
+        for candidate in self.path.parent.glob(
+            f"{self.path.stem}.*{self.path.suffix}"
+        ):
+            match = pattern.match(candidate.name)
+            if not match:
+                continue
+            try:
+                archive_day = datetime.strptime(
+                    match.group(1),
+                    "%Y-%m-%d",
+                ).date()
+            except ValueError:
+                continue
+            if archive_day < cutoff:
+                candidate.unlink()
+                LOGGER.info("flow=geocoder csv_retention_delete path=%s", candidate)
+
+    def append(self, row):
+        day = self._row_day(row)
+        with self.lock:
+            if self.active_day is not None and day > self.active_day:
+                if self.path.exists() and self.path.stat().st_size > 0:
+                    archive = self._archive_path(self.active_day)
+                    self.path.replace(archive)
+                    LOGGER.info(
+                        "flow=geocoder csv_rotate path=%s archive=%s",
+                        self.path,
+                        archive,
+                    )
+                self._cleanup(day)
+                self.active_day = day
+            elif self.active_day is None:
+                self.active_day = day
+            exists = self.path.exists() and self.path.stat().st_size > 0
+            with self.path.open("a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if not exists:
+                    writer.writerow(CSV_HEADER)
+                writer.writerow([row.get(k, "") for k in CSV_HEADER])
+
+
+csv_appender = DailyCsvAppender(OUTPUT_CSV)
+
+
 def append_csv(row):
-    OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    exists = OUTPUT_CSV.exists() and OUTPUT_CSV.stat().st_size > 0
-    with OUTPUT_CSV.open("a", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        if not exists:
-            w.writerow(CSV_HEADER)
-        w.writerow([row.get(k, "") for k in CSV_HEADER])
+    csv_appender.append(row)
     LOGGER.info("flow=geocoder csv_write path=%s time=%s address=%s lat=%s lon=%s", OUTPUT_CSV, row.get("time"), row.get("address_label"), row.get("lat"), row.get("lon"))
 
 
@@ -141,6 +224,41 @@ def get_history():
 
 @app.post("/api/position")
 async def post_position(payload: dict):
+    if payload.get("event") == "decode_unavailable":
+        response = {
+            "ok": False,
+            "event": "decode_unavailable",
+            "clear_display": True,
+            "error": payload.get("reason", "GPS fix unavailable"),
+            "prefecture": "",
+            "city": "",
+            "ward": "",
+            "address_label": "",
+            "admin_code": "",
+            "time": payload.get("time", ""),
+            "lat": "",
+            "lon": "",
+            "alt": "",
+            "source": payload.get("source", ""),
+            "channel": payload.get("channel", ""),
+        }
+        response["outputs"] = [
+            {"name": name, "queued": True}
+            for name in outputs.names()
+        ]
+        with lock:
+            global latest
+            latest = response
+            history.appendleft(response)
+        enqueue_output(response)
+        LOGGER.warning(
+            "flow=geocoder decode_unavailable time=%s source=%s channel=%s",
+            response["time"],
+            response["source"],
+            response["channel"],
+        )
+        return response
+
     try:
         lat = float(payload["lat"])
         lon = float(payload["lon"])
@@ -159,6 +277,8 @@ async def post_position(payload: dict):
         "source": payload.get("source", ""),
         "channel": payload.get("channel", ""),
     }
+    if not response.get("ok"):
+        response["clear_display"] = True
     csv_row = {
         "time": response["time"],
         "lon": f"{lon:.8f}",
@@ -176,7 +296,6 @@ async def post_position(payload: dict):
         for name in outputs.names()
     ]
     with lock:
-        global latest
         latest = response
         history.appendleft(response)
     enqueue_output(response)

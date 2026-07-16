@@ -62,6 +62,8 @@ REVERSE_GEOCODER_TIMEOUT_SECONDS = env_float("REVERSE_GEOCODER_TIMEOUT_SECONDS",
 GEOCODE_QUEUE_SIZE = env_int("GEOCODE_QUEUE_SIZE", 100)
 GEOCODE_RETRY_COUNT = env_int("GEOCODE_RETRY_COUNT", 3)
 GEOCODE_RETRY_BASE_SECONDS = env_float("GEOCODE_RETRY_BASE_SECONDS", 1.0)
+GPS_NO_FIX_NOTIFY_SECONDS = env_float("GPS_NO_FIX_NOTIFY_SECONDS", 5.0)
+CSV_RETENTION_DAYS = env_int("CSV_RETENTION_DAYS", 90)
 PCM_SOCKET_HOST = os.environ.get("PCM_SOCKET_HOST", "0.0.0.0")
 PCM_SOCKET_PORT = env_int("PCM_SOCKET_PORT", 9010)
 PCM_SOCKET_HEADER_MAX_BYTES = env_int("PCM_SOCKET_HEADER_MAX_BYTES", 4096)
@@ -310,14 +312,23 @@ def post_reverse_geocode(config, row):
     if not url:
         LOGGER.info("flow=reverse_geocode skipped reason=no_url lat=%s lon=%s", row.get("lat"), row.get("lon"))
         return None
-    payload = {
-        "time": row["time"],
-        "lat": float(row["lat"]),
-        "lon": float(row["lon"]),
-        "alt": row["alt"],
-        "source": "get_heri_gps",
-        "channel": row["channel"],
-    }
+    if row.get("event") == "decode_unavailable":
+        payload = {
+            "event": "decode_unavailable",
+            "time": row["time"],
+            "source": "get_heri_gps",
+            "channel": row["channel"],
+            "reason": row.get("reason", "no recent GPS fix"),
+        }
+    else:
+        payload = {
+            "time": row["time"],
+            "lat": float(row["lat"]),
+            "lon": float(row["lon"]),
+            "alt": row["alt"],
+            "source": "get_heri_gps",
+            "channel": row["channel"],
+        }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -428,7 +439,9 @@ def geocode_sender_main(config, send_queue, worker_done):
 
 
 def enqueue_geocode(send_queue, row):
-    if not (row.get("lat") and row.get("lon")):
+    if row.get("event") != "decode_unavailable" and not (
+        row.get("lat") and row.get("lon")
+    ):
         return
     # Place-name display is real-time data. Discard every pending older
     # position before enqueueing the newest fix instead of building a backlog.
@@ -469,20 +482,99 @@ class CsvWriter:
         if not self.path.is_absolute():
             self.path = BASE_DIR / self.path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = self.path.open("a", newline="")
-        self.writer = csv.writer(self.file)
-        if self.path.stat().st_size == 0:
-            self.writer.writerow(CSV_HEADER)
-            self.file.flush()
-        LOGGER.info("flow=csv open path=%s", self.path)
+        self.file = None
+        self.writer = None
+        self.active_day = (
+            datetime.fromtimestamp(self.path.stat().st_mtime, JST).date()
+            if self.path.exists() and self.path.stat().st_size > 0
+            else None
+        )
+        self._cleanup(now_jst().date())
+
+    def _row_day(self, row):
+        try:
+            return datetime.strptime(
+                str(row.get("time", ""))[:10],
+                "%Y/%m/%d",
+            ).date()
+        except ValueError:
+            return now_jst().date()
+
+    def _archive_path(self, day):
+        base = self.path.with_name(
+            f"{self.path.stem}.{day.isoformat()}{self.path.suffix}"
+        )
+        candidate = base
+        index = 1
+        while candidate.exists():
+            candidate = self.path.with_name(
+                f"{self.path.stem}.{day.isoformat()}.{index}{self.path.suffix}"
+            )
+            index += 1
+        return candidate
+
+    def _cleanup(self, current_day):
+        if CSV_RETENTION_DAYS <= 0:
+            return
+        cutoff = current_day - timedelta(days=CSV_RETENTION_DAYS)
+        pattern = re.compile(
+            rf"^{re.escape(self.path.stem)}\.(\d{{4}}-\d{{2}}-\d{{2}})(?:\.\d+)?{re.escape(self.path.suffix)}$"
+        )
+        for candidate in self.path.parent.glob(
+            f"{self.path.stem}.*{self.path.suffix}"
+        ):
+            match = pattern.match(candidate.name)
+            if not match:
+                continue
+            try:
+                archive_day = datetime.strptime(
+                    match.group(1),
+                    "%Y-%m-%d",
+                ).date()
+            except ValueError:
+                continue
+            if archive_day < cutoff:
+                candidate.unlink()
+                LOGGER.info("flow=csv retention_delete path=%s", candidate)
+
+    def _open(self, day):
+        if self.active_day is not None and day > self.active_day:
+            self.close()
+            if self.path.exists() and self.path.stat().st_size > 0:
+                archive = self._archive_path(self.active_day)
+                self.path.replace(archive)
+                LOGGER.info(
+                    "flow=csv rotate path=%s archive=%s",
+                    self.path,
+                    archive,
+                )
+            self._cleanup(day)
+            self.active_day = day
+        elif self.active_day is None:
+            self.active_day = day
+        if self.file is None:
+            self.file = self.path.open("a", newline="", encoding="utf-8")
+            self.writer = csv.writer(self.file)
+            if self.path.stat().st_size == 0:
+                self.writer.writerow(CSV_HEADER)
+                self.file.flush()
+            LOGGER.info(
+                "flow=csv open path=%s day=%s",
+                self.path,
+                self.active_day,
+            )
 
     def write(self, row):
+        self._open(self._row_day(row))
         self.writer.writerow([row.get(k, "") for k in CSV_HEADER])
         self.file.flush()
         LOGGER.info("flow=csv write path=%s time=%s lat=%s lon=%s alt=%s", self.path, row.get("time"), row.get("lat"), row.get("lon"), row.get("alt"))
 
     def close(self):
-        self.file.close()
+        if self.file is not None:
+            self.file.close()
+            self.file = None
+            self.writer = None
 
 
 def read_metadata_start(capture_dir):
@@ -667,6 +759,8 @@ def worker_main():
     total_samples = 0
     active_source_start = None
     last_progress = time.monotonic()
+    last_new_fix_at = time.monotonic()
+    decode_unavailable_notified = False
     LOGGER.info(
         "flow=worker start mode=socket listen=%s:%s output_csv=%s",
         config.pcm_socket_host,
@@ -715,12 +809,14 @@ def worker_main():
                 LOGGER.info("flow=demod decode_ok fixes=%s buffer_samples=%s buffer_start=%s", len(fixes), len(sample_buffer), buffer_start_sample)
             else:
                 LOGGER.debug("flow=demod no_fix buffer_samples=%s buffer_start=%s", len(sample_buffer), buffer_start_sample)
+            new_fix_received = False
             for fix in fixes:
                 offset_sec = fix.sample_offset / SAMPLE_RATE
                 key = (round(offset_sec, 2), fix.payload_hex)
                 if key in seen:
                     continue
                 seen.add(key)
+                new_fix_received = True
                 t = source_start + timedelta(seconds=offset_sec)
                 row = {
                     "time": format_japanese_time(t),
@@ -748,6 +844,30 @@ def worker_main():
                 writer.write(row)
                 STATE.add_row(row)
                 enqueue_geocode(geocode_queue, row)
+            if new_fix_received:
+                last_new_fix_at = time.monotonic()
+                decode_unavailable_notified = False
+            elif (
+                not decode_unavailable_notified
+                and time.monotonic() - last_new_fix_at
+                >= GPS_NO_FIX_NOTIFY_SECONDS
+            ):
+                event = {
+                    "event": "decode_unavailable",
+                    "time": format_japanese_time(now_jst()),
+                    "source": source_name,
+                    "channel": config.gps_channel,
+                    "reason": f"no GPS fix for {GPS_NO_FIX_NOTIFY_SECONDS:g} seconds",
+                    "payload_hex": "",
+                }
+                LOGGER.warning(
+                    "flow=gps unavailable seconds=%.1f source=%s channel=%s",
+                    GPS_NO_FIX_NOTIFY_SECONDS,
+                    source_name,
+                    config.gps_channel,
+                )
+                enqueue_geocode(geocode_queue, event)
+                decode_unavailable_notified = True
     except Exception as exc:
         LOGGER.exception("flow=worker error error=%s", exc)
         STATE.mark_stopped(str(exc))
