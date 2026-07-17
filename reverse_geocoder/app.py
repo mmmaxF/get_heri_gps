@@ -176,6 +176,8 @@ def output_worker():
                 for result in output_results:
                     if result.get("name") == "multiviewer":
                         response["multiviewer"] = result
+                    elif result.get("name") == "atem":
+                        response["atem"] = result
             for result in output_results:
                 if result.get("sent"):
                     LOGGER.info("flow=output sent name=%s text=%s", result.get("name"), result.get("text", ""))

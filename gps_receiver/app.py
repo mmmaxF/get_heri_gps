@@ -58,6 +58,7 @@ DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positio
 DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
+ATEM_OUTPUT_HEALTH_URL = os.environ.get("ATEM_OUTPUT_HEALTH_URL", "http://atem-output:8030/api/health")
 REVERSE_GEOCODER_TIMEOUT_SECONDS = env_float("REVERSE_GEOCODER_TIMEOUT_SECONDS", 3.0)
 GEOCODE_QUEUE_SIZE = env_int("GEOCODE_QUEUE_SIZE", 100)
 GEOCODE_RETRY_COUNT = env_int("GEOCODE_RETRY_COUNT", 3)
@@ -953,6 +954,8 @@ def system_status():
     reverse_body = {}
     reverse_latest = {}
     reverse_error = ""
+    atem_body = {}
+    atem_error = ""
     try:
         with urllib.request.urlopen(reverse_health_url, timeout=2.0) as response:
             reverse_body = json.loads(response.read(65536).decode("utf-8"))
@@ -960,6 +963,11 @@ def system_status():
             reverse_latest = json.loads(response.read(65536).decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         reverse_error = str(exc)
+    try:
+        with urllib.request.urlopen(ATEM_OUTPUT_HEALTH_URL, timeout=2.0) as response:
+            atem_body = json.loads(response.read(65536).decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        atem_error = str(exc)
 
     capture_config = capture_body.get("config", {})
     capture_logs = capture_body.get("logs", [])
@@ -1022,6 +1030,14 @@ def system_status():
                 "multiviewer_sent": latest_multiviewer.get("sent"),
                 "multiviewer_error": latest_multiviewer.get("error", ""),
             },
+        },
+        "atem_output": {
+            "ok": bool(atem_body.get("ok")),
+            "error": atem_error,
+            "atem_enabled": bool(atem_body.get("atem_enabled")),
+            "atem_host": atem_body.get("atem_host", ""),
+            "image_exists": bool(atem_body.get("image_exists")),
+            "latest": atem_body.get("latest", {}),
         },
     }
 

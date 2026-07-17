@@ -6,6 +6,7 @@
 |---|---|---|
 | `get-heri-gps` | `http://<host>:8010` | [api/get-heri-gps.md](api/get-heri-gps.md) |
 | `reverse-geocoder` | `http://<host>:8020` | [api/reverse-geocoder.md](api/reverse-geocoder.md) |
+| `atem-output` | `http://<host>:8030` | [api/atem-output.md](api/atem-output.md) |
 
 `gps-demodulator` はAPIを提供しないため、API詳細ファイルはありません。
 
@@ -17,6 +18,8 @@ flowchart LR
     Client -->|HTTP| GEO
     GEO -->|DB検索| DB[(行政区域テーブル<br/>areas)]
     GEO -->|TCPコマンド| MV[マルチビューア]
+    GEO -->|POST /api/position| ATEMOUT[ATEM PNG出力<br/>atem-output]
+    ATEMOUT -->|PNG生成 / 任意でATEM送信| ATEM[ATEM 1 M/E Constellation HD]
 ```
 
 呼び出し元から各APIへの関係と、API間の唯一の直接呼出しを示しています。`get-heri-gps` はGPS fix取得後に `reverse-geocoder` の位置APIを同期呼出しします。
@@ -39,6 +42,12 @@ flowchart TB
     GEO --> R2[最新位置 GET /api/latest]
     GEO --> R3[位置履歴 GET /api/history]
     GEO --> R4[位置受付 POST /api/position]
+    ATEMOUT[ATEM PNG出力<br/>atem-output]
+    ATEMOUT --> A1[稼働確認 GET /api/health]
+    ATEMOUT --> A2[最新状態 GET /api/latest]
+    ATEMOUT --> A3[PNG取得 GET /api/preview.png]
+    ATEMOUT --> A4[地名受付 POST /api/position]
+    ATEMOUT --> A5[テスト生成 POST /api/test]
 ```
 
 上段がGPS受信コンテナ、下段が逆ジオコンテナの業務APIです。FastAPIが自動生成する `/docs`、`/redoc`、`/openapi.json` は後続の表に分けています。
@@ -65,6 +74,16 @@ flowchart TB
 | GET | `/api/latest` | 最新位置 | WF-004 |
 | GET | `/api/history` | 直近100件 | WF-004 |
 | POST | `/api/position` | 逆ジオ、CSV、MV送信 | WF-004 |
+
+### atem-output
+
+| Method | Path | 概要 | 関連WF |
+|---|---|---|---|
+| GET | `/api/health` | PNG/ATEM出力状態 | WF-004 |
+| GET | `/api/latest` | 最新PNG生成・送信結果 | WF-004 |
+| GET | `/api/preview.png` | 最新PNG取得 | WF-004 |
+| POST | `/api/position` | 地名PNG生成、任意でATEM送信 | WF-004 |
+| POST | `/api/test` | 任意文字列でPNG生成テスト | WF-004 |
 
 ### FastAPI自動エンドポイント
 

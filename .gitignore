@@ -7,6 +7,8 @@ gps_receiver/logs/
 reverse_geocoder/data/
 reverse_geocoder/output/
 reverse_geocoder/logs/
+atem_output/output/
+atem_output/logs/
 telop_output/config/*.json
 telop_output/logs/
 gps_receiver/input/*

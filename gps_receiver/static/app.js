@@ -142,6 +142,8 @@ async function refreshSystemStatus() {
     const capture = status.capture_agent || {};
     const receiver = status.gps_receiver || {};
     const geocoder = status.reverse_geocoder || {};
+    const atem = status.atem_output || {};
+    const atemLatest = atem.latest || {};
     setServiceStatus(
       "captureServiceStatus",
       capture.ok && capture.running,
@@ -157,6 +159,17 @@ async function refreshSystemStatus() {
       geocoder.ok && geocoder.db_loaded,
       geocoder.ok && geocoder.db_loaded
         ? `稼働中・行政区域 ${Number(geocoder.area_count || 0).toLocaleString("ja-JP")}件`
+        : "接続できません",
+    );
+    setServiceStatus(
+      "atemServiceStatus",
+      atem.ok,
+      atem.ok
+        ? atem.atem_enabled
+          ? atemLatest.atem_sent
+            ? "ATEM送信済み"
+            : "PNG生成中・ATEM待機"
+          : "PNG生成のみ"
         : "接続できません",
     );
     renderServiceDetails("captureServiceDetails", [
@@ -191,6 +204,21 @@ async function refreshSystemStatus() {
       ["行政コード", geocoder.output?.admin_code],
       ["区域DB", `${Number(geocoder.area_count || 0).toLocaleString("ja-JP")}件`],
       ["マルチビューアー", multiviewerText],
+    ]);
+    const atemText = atemLatest.error
+      ? `エラー: ${atemLatest.error}`
+      : atemLatest.skipped
+        ? `未送信: ${atemLatest.reason || ""}`
+        : atemLatest.sent
+          ? "送信成功"
+          : "待機中";
+    renderServiceDetails("atemServiceDetails", [
+      ["ATEM接続", atem.atem_enabled ? `${atem.atem_host || "-"}（有効）` : "無効・PNG生成のみ"],
+      ["最新テキスト", atemLatest.text],
+      ["更新時刻", atemLatest.updated_at],
+      ["PNG", atem.image_exists ? "生成済み" : "未生成"],
+      ["Preview", atem.image_exists ? "http://127.0.0.1:8030/api/preview.png" : "-"],
+      ["ATEM送信", atemText],
     ]);
     $("systemCheckedAt").textContent = `最終確認 ${formatClock(new Date())}`;
   } catch (error) {
@@ -311,6 +339,19 @@ function update(payload) {
     $("multiviewerStatus").textContent = `未送信: ${mv.reason || ""}`;
   } else {
     $("multiviewerStatus").textContent = "待機中";
+  }
+  const atem = (payload.latest?.geocode?.outputs || payload.latest_geocode?.outputs || [])
+    .find((item) => item.name === "atem");
+  if (atem?.sent) {
+    $("atemStatus").textContent = `送信OK: ${atem.text || ""}`;
+  } else if (atem?.error) {
+    $("atemStatus").textContent = "送信エラー";
+  } else if (atem?.skipped) {
+    $("atemStatus").textContent = atem.reason === "ATEM_ENABLED=0" ? "PNG生成のみ" : "未送信";
+  } else if (atem?.queued) {
+    $("atemStatus").textContent = "送信待ち";
+  } else {
+    $("atemStatus").textContent = "待機中";
   }
 
   const latest = payload.latest;

@@ -1,10 +1,12 @@
 import os
 
 from .base import OutputResult
+from .atem import AtemAdapter
 from .multiviewer import MultiviewerAdapter
 
 
 ADAPTERS = {
+    "atem": AtemAdapter,
     "multiviewer": MultiviewerAdapter,
 }
 

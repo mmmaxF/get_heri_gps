@@ -68,3 +68,23 @@ services:
       options:
         max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
         max-file: "${DOCKER_LOG_MAX_FILE:-3}"
+
+  atem-output:
+    build:
+      context: ./atem_output
+      args:
+        ATEM_OUTPUT_PORT: "${ATEM_OUTPUT_PORT:-8030}"
+    container_name: atem_output
+    restart: unless-stopped
+    env_file:
+      - "${ATEM_OUTPUT_ENV_FILE:-./atem_output/.env}"
+    ports:
+      - "${ATEM_OUTPUT_PORT:-8030}:${ATEM_OUTPUT_PORT:-8030}"
+    volumes:
+      - "${HOST_ATEM_OUTPUT_DIR:-./atem_output/output}:/app/output"
+      - "${HOST_ATEM_LOG_DIR:-./atem_output/logs}:/app/logs"
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-3}"

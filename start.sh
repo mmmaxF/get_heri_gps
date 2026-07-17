@@ -8,7 +8,7 @@ if [ ! -f .env ]; then
   echo ".env がなかったため .env.example から作成しました。"
 fi
 
-for service_dir in gps_receiver reverse_geocoder; do
+for service_dir in gps_receiver reverse_geocoder atem_output; do
   if [ ! -f "${service_dir}/.env" ]; then
     cp "${service_dir}/.env.example" "${service_dir}/.env"
     echo "${service_dir}/.env がなかったため ${service_dir}/.env.example から作成しました。"
@@ -31,6 +31,7 @@ APP_PORT="$(env_value APP_PORT 8010)"
 APP_PORT="$(env_value GPS_RECEIVER_PORT "${APP_PORT}")"
 APP_PUBLIC_HOST="$(env_value APP_PUBLIC_HOST 127.0.0.1)"
 REVERSE_GEOCODER_PORT="$(env_value REVERSE_GEOCODER_PORT 8020)"
+ATEM_OUTPUT_PORT="$(env_value ATEM_OUTPUT_PORT 8030)"
 APP_URL="http://${APP_PUBLIC_HOST}:${APP_PORT}"
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
@@ -50,6 +51,8 @@ mkdir -p "$(env_value HOST_GPS_LOG_DIR ./gps_receiver/logs)"
 mkdir -p "$(env_value HOST_GEOCODER_DATA_DIR ./reverse_geocoder/data)"
 mkdir -p "$(env_value HOST_GEOCODER_OUTPUT_DIR ./reverse_geocoder/output)"
 mkdir -p "$(env_value HOST_GEOCODER_LOG_DIR ./reverse_geocoder/logs)"
+mkdir -p "$(env_value HOST_ATEM_OUTPUT_DIR ./atem_output/output)"
+mkdir -p "$(env_value HOST_ATEM_LOG_DIR ./atem_output/logs)"
 
 echo "既存のget_heri_gps Dockerコンテナを削除します..."
 docker compose down --remove-orphans
@@ -67,6 +70,7 @@ if [ -n "${LAN_IP}" ]; then
 echo "LAN:      http://${LAN_IP}:${APP_PORT}"
 fi
 echo "逆ジオコーダーAPI: http://127.0.0.1:${REVERSE_GEOCODER_PORT}/api/health"
+echo "ATEM PNG出力API: http://127.0.0.1:${ATEM_OUTPUT_PORT}/api/health"
 echo
 echo "ログ確認: docker compose logs -f"
 echo "停止:     docker compose down"
