@@ -1,167 +1,89 @@
-# API索引
+# API
 
-## API提供コンテナ
+認証はありません。ローカル運用前提です。
 
-| Service | Base URL | 詳細 |
+## Base URL
+
+| Service | URL | 用途 |
 |---|---|---|
-| `get-heri-gps` | `http://<host>:8010` | [api/get-heri-gps.md](api/get-heri-gps.md) |
-| `reverse-geocoder` | `http://<host>:8020` | [api/reverse-geocoder.md](api/reverse-geocoder.md) |
-| `atem-output` | `http://<host>:8030` | [api/atem-output.md](api/atem-output.md) |
+| get-heri-gps | `http://<host>:8010` | UI、GPS状態、capture-agent proxy |
+| reverse-geocoder | `http://<host>:8020` | 逆ジオ、最新住所 |
+| atem-output | `http://<host>:8030` | ATEM PNG状態、プレビュー |
 
-`gps-demodulator` はAPIを提供しないため、API詳細ファイルはありません。
+## よく使うAPI
 
-```mermaid
-flowchart LR
-    Browser[ブラウザUI] -->|HTTP / WebSocket| GPS[GPS受信API<br/>get-heri-gps]
-    Client[APIクライアント] -->|HTTP| GPS
-    GPS -->|POST /api/position| GEO[逆ジオAPI<br/>reverse-geocoder]
-    Client -->|HTTP| GEO
-    GEO -->|DB検索| DB[(行政区域テーブル<br/>areas)]
-    GEO -->|TCPコマンド| MV[マルチビューア]
-    GEO -->|POST /api/position| ATEMOUT[ATEM PNG出力<br/>atem-output]
-    ATEMOUT -->|PNG生成 / 任意でATEM送信| ATEM[ATEM 1 M/E Constellation HD]
+GPS状態:
+
+```bash
+curl -s http://127.0.0.1:8010/api/status | python3 -m json.tool
 ```
 
-呼び出し元から各APIへの関係と、API間の唯一の直接呼出しを示しています。`get-heri-gps` はGPS fix取得後に `reverse-geocoder` の位置APIを同期呼出しします。
+逆ジオ最新:
 
-## 全API一覧
-
-```mermaid
-flowchart TB
-    GPS[GPS受信・復調<br/>get-heri-gps]
-    GPS --> G0[操作画面 GET /]
-    GPS --> G1[状態取得 GET /api/status]
-    GPS --> G2[デバイス一覧 GET /api/devices]
-    GPS --> G3[設定変更 POST /api/config]
-    GPS --> G4[受信開始 POST /api/start]
-    GPS --> G5[受信停止 POST /api/stop]
-    GPS --> G6[CSV取得 GET /api/download]
-    GPS --> G7[状態配信 WebSocket /ws]
-    GEO[逆ジオコーディング<br/>reverse-geocoder]
-    GEO --> R1[稼働確認 GET /api/health]
-    GEO --> R2[最新位置 GET /api/latest]
-    GEO --> R3[位置履歴 GET /api/history]
-    GEO --> R4[位置受付 POST /api/position]
-    ATEMOUT[ATEM PNG出力<br/>atem-output]
-    ATEMOUT --> A1[稼働確認 GET /api/health]
-    ATEMOUT --> A2[最新状態 GET /api/latest]
-    ATEMOUT --> A3[PNG取得 GET /api/preview.png]
-    ATEMOUT --> A4[地名受付 POST /api/position]
-    ATEMOUT --> A5[テスト生成 POST /api/test]
+```bash
+curl -s http://127.0.0.1:8020/api/latest | python3 -m json.tool
 ```
 
-上段がGPS受信コンテナ、下段が逆ジオコンテナの業務APIです。FastAPIが自動生成する `/docs`、`/redoc`、`/openapi.json` は後続の表に分けています。
+ATEM状態:
 
+```bash
+curl -s http://127.0.0.1:8030/api/health | python3 -m json.tool
+curl -s http://127.0.0.1:8030/api/latest | python3 -m json.tool
+```
 
-### get-heri-gps
+ATEM PNG:
 
-| Method | Path | 概要 | 関連WF |
-|---|---|---|---|
-| GET | `/` | UI HTML | WF-007 |
-| GET | `/api/status` | runtime状態 | WF-002、WF-003、WF-007 |
-| GET | `/api/devices` | ALSA capture device一覧 | WF-002 |
-| POST | `/api/config` | runtime設定変更 | WF-002 |
-| POST | `/api/start` | worker開始 | WF-002 |
-| POST | `/api/stop` | worker停止要求 | WF-002 |
-| GET | `/api/download` | GPS CSV取得 | WF-003 |
-| WebSocket | `/ws` | 状態stream | WF-007 |
+```bash
+curl -s http://127.0.0.1:8030/api/preview.png -o /tmp/atem_preview.png
+```
 
-### reverse-geocoder
+## get-heri-gps
 
-| Method | Path | 概要 | 関連WF |
-|---|---|---|---|
-| GET | `/api/health` | DB状態・件数 | WF-001、WF-005 |
-| GET | `/api/latest` | 最新位置 | WF-004 |
-| GET | `/api/history` | 直近100件 | WF-004 |
-| POST | `/api/position` | 逆ジオ、CSV、MV送信 | WF-004 |
-
-### atem-output
-
-| Method | Path | 概要 | 関連WF |
-|---|---|---|---|
-| GET | `/api/health` | PNG/ATEM出力状態 | WF-004 |
-| GET | `/api/latest` | 最新PNG生成・送信結果 | WF-004 |
-| GET | `/api/preview.png` | 最新PNG取得 | WF-004 |
-| POST | `/api/position` | 地名PNG生成、任意でATEM送信 | WF-004 |
-| POST | `/api/test` | 任意文字列でPNG生成テスト | WF-004 |
-
-### FastAPI自動エンドポイント
-
-両APIコンテナは `FastAPI(...)` の既定設定を使用するため、次も公開されます。
-
-| Method | Path | 概要 |
+| Method | Path | 内容 |
 |---|---|---|
-| GET | `/docs` | Swagger UI |
-| GET | `/redoc` | ReDoc |
-| GET | `/openapi.json` | OpenAPI 3.1 document |
+| GET | `/` | UI |
+| GET | `/api/status` | GPS受信・復調状態 |
+| GET | `/api/system/status` | GPS、逆ジオ、ATEMの統合状態 |
+| GET | `/api/capture-agent/status` | capture-agent状態 |
+| POST | `/api/capture-agent/start` | capture-agent開始 |
+| POST | `/api/capture-agent/stop` | capture-agent停止 |
+| GET | `/api/download` | GPS CSV取得 |
+| WS | `/ws` | 状態配信 |
 
-StaticFilesにより `get-heri-gps` は `/static/*` も配信します。これは業務APIではありません。
+## reverse-geocoder
 
-## 共通仕様
+| Method | Path | 内容 |
+|---|---|---|
+| GET | `/api/health` | DB状態 |
+| GET | `/api/latest` | 最新住所・出力結果 |
+| GET | `/api/history` | 直近履歴 |
+| POST | `/api/position` | 緯度経度を受けて住所化 |
 
-### Protocol
+手動POST例:
 
-- HTTP/1.1 plain HTTP
-- JSON APIは `application/json`
-- `GET /api/download` は `text/csv`
-- `/ws` はWebSocket
-- アプリ内TLSなし
-
-### 認証
-
-認証・認可はありません。API key、session、JWT、Basic認証は実装されていません。
-
-### CORS
-
-CORS middlewareは設定されていません。同一originの8010 UIは問題ありませんが、別origin browserからの直接API呼出し要件は `TODO: 要確認` です。
-
-### Request model
-
-`POST /api/config` と `POST /api/position` は引数型が `dict` で、Pydanticの個別modelはありません。このためOpenAPI request schemaは `additionalProperties: true` の汎用objectです。
-
-### Response model
-
-明示的response modelはありません。OpenAPIの成功response schemaは空objectです。実際のfieldは各詳細ドキュメントにコード準拠で記載します。
-
-### Error形式
-
-アプリ明示エラー:
-
-```json
-{
-  "ok": false,
-  "error": "message"
-}
+```bash
+curl -s -X POST http://127.0.0.1:8020/api/position \
+  -H 'Content-Type: application/json' \
+  -d '{"time":"2026/07/18 16:30:00","lat":34.6937,"lon":135.5023,"alt":1000}' \
+  | python3 -m json.tool
 ```
 
-FastAPI validation error例:
+## atem-output
 
-```json
-{
-  "detail": [
-    {
-      "loc": ["body"],
-      "msg": "Field required",
-      "type": "missing"
-    }
-  ]
-}
+| Method | Path | 内容 |
+|---|---|---|
+| GET | `/api/health` | ATEM出力状態、worker状態 |
+| GET | `/api/latest` | 最新PNG/送信結果 |
+| GET | `/api/preview.png` | 最新PNG |
+| POST | `/api/position` | ATEM用PNG生成・送信queue投入 |
+| POST | `/api/test` | テスト文字列でPNG生成 |
+
+テスト:
+
+```bash
+curl -s -X POST http://127.0.0.1:8030/api/test \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"大阪府大阪市"}' \
+  | python3 -m json.tool
 ```
 
-未捕捉例外はHTTP 500になり得ます。共通例外handlerはありません。
-
-## Status code概要
-
-| Code | 用途 |
-|---|---|
-| 200 | 正常、または業務上not found/MV送信失敗をbodyで表現 |
-| 400 | 設定変更エラー、`lat/lon` 不正 |
-| 404 | 未定義path、存在しないstatic file |
-| 422 | body欠落・JSON型不一致等のFastAPI validation error |
-| 500 | CSV/DB/FileResponse等の未捕捉例外 |
-
-## OpenAPI上の注意
-
-- `/ws` はOpenAPIに含まれません。
-- `/api/download` は実行時CSVですが、response classがOpenAPIへ明示されていないため生成定義上はJSONとして表示されます。
-- 独自modelがないため、Swagger UIだけでは実fieldが分かりません。

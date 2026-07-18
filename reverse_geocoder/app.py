@@ -4,6 +4,7 @@
 import csv
 import logging
 from logging.handlers import RotatingFileHandler
+import math
 import os
 import queue
 import re
@@ -32,6 +33,13 @@ LOG_BACKUP_COUNT = int(float(os.environ.get("LOG_BACKUP_COUNT", 5)))
 OUTPUT_QUEUE_SIZE = int(float(os.environ.get("OUTPUT_QUEUE_SIZE", 10)))
 CSV_RETENTION_DAYS = int(float(os.environ.get("CSV_RETENTION_DAYS", 90)))
 JST = timezone(timedelta(hours=9))
+CAPTURE_LOCATION_ENABLED = os.environ.get("CAPTURE_LOCATION_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+CAPTURE_CAMERA_HEADING_BCD_OFFSET = int(float(os.environ.get("CAPTURE_CAMERA_HEADING_BCD_OFFSET", "31")))
+CAPTURE_CAMERA_HEADING_SCALE = float(os.environ.get("CAPTURE_CAMERA_HEADING_SCALE", "0.1"))
+CAPTURE_CAMERA_TILT_BCD_OFFSET = int(float(os.environ.get("CAPTURE_CAMERA_TILT_BCD_OFFSET", "29")))
+CAPTURE_CAMERA_TILT_SCALE = float(os.environ.get("CAPTURE_CAMERA_TILT_SCALE", "0.01"))
+CAPTURE_TILT_MIN_DEGREES = float(os.environ.get("CAPTURE_TILT_MIN_DEGREES", "1.0"))
+CAPTURE_MAX_DISTANCE_METERS = float(os.environ.get("CAPTURE_MAX_DISTANCE_METERS", "10000"))
 
 
 def setup_logger():
@@ -166,6 +174,101 @@ def append_csv(row):
     LOGGER.info("flow=geocoder csv_write path=%s time=%s address=%s lat=%s lon=%s", OUTPUT_CSV, row.get("time"), row.get("address_label"), row.get("lat"), row.get("lon"))
 
 
+def bcd_byte(value):
+    hi = (value >> 4) & 0xF
+    lo = value & 0xF
+    if hi > 9 or lo > 9:
+        return None
+    return hi * 10 + lo
+
+
+def parse_bcd_u16(payload, offset):
+    if offset < 0 or offset + 1 >= len(payload):
+        return None
+    high = bcd_byte(payload[offset])
+    low = bcd_byte(payload[offset + 1])
+    if high is None or low is None:
+        return None
+    return high * 100 + low
+
+
+def project_position(lat, lon, bearing_degrees, distance_meters):
+    radius = 6378137.0
+    lat1 = math.radians(lat)
+    lon1 = math.radians(lon)
+    bearing = math.radians(bearing_degrees)
+    angular = distance_meters / radius
+    lat2 = math.asin(
+        math.sin(lat1) * math.cos(angular)
+        + math.cos(lat1) * math.sin(angular) * math.cos(bearing)
+    )
+    lon2 = lon1 + math.atan2(
+        math.sin(bearing) * math.sin(angular) * math.cos(lat1),
+        math.cos(angular) - math.sin(lat1) * math.sin(lat2),
+    )
+    return math.degrees(lat2), ((math.degrees(lon2) + 540) % 360) - 180
+
+
+def capture_location_from_payload(payload, lat, lon, alt):
+    if not CAPTURE_LOCATION_ENABLED:
+        return {}
+    payload_hex = str(payload.get("payload_hex", "")).strip()
+    if not payload_hex:
+        return {}
+    try:
+        raw = bytes.fromhex(payload_hex)
+        altitude = float(alt)
+    except (TypeError, ValueError):
+        return {"capture_error": "invalid payload/alt"}
+
+    heading_raw = parse_bcd_u16(raw, CAPTURE_CAMERA_HEADING_BCD_OFFSET)
+    tilt_raw = parse_bcd_u16(raw, CAPTURE_CAMERA_TILT_BCD_OFFSET)
+    if heading_raw is None or tilt_raw is None:
+        return {"capture_error": "camera fields unavailable"}
+
+    heading = (heading_raw * CAPTURE_CAMERA_HEADING_SCALE) % 360.0
+    tilt = tilt_raw * CAPTURE_CAMERA_TILT_SCALE
+    if tilt < CAPTURE_TILT_MIN_DEGREES:
+        return {
+            "capture_heading": round(heading, 3),
+            "capture_tilt": round(tilt, 3),
+            "capture_error": "tilt too shallow",
+        }
+
+    distance = altitude / math.tan(math.radians(tilt))
+    if not math.isfinite(distance) or distance <= 0:
+        return {"capture_heading": round(heading, 3), "capture_tilt": round(tilt, 3), "capture_error": "invalid distance"}
+    distance = min(distance, CAPTURE_MAX_DISTANCE_METERS)
+    target_lat, target_lon = project_position(lat, lon, heading, distance)
+    capture_geocode = geocoder.reverse(target_lat, target_lon)
+    response = {
+        "capture_enabled": True,
+        "capture_lat": target_lat,
+        "capture_lon": target_lon,
+        "capture_distance_m": round(distance, 1),
+        "capture_heading": round(heading, 3),
+        "capture_tilt": round(tilt, 3),
+        "capture_ok": bool(capture_geocode.get("ok")),
+        "capture_prefecture": capture_geocode.get("prefecture", ""),
+        "capture_city": capture_geocode.get("city", ""),
+        "capture_ward": capture_geocode.get("ward", ""),
+        "capture_address_label": capture_geocode.get("address_label", ""),
+        "capture_admin_code": capture_geocode.get("admin_code", ""),
+    }
+    if not capture_geocode.get("ok"):
+        response["capture_error"] = capture_geocode.get("error", "capture reverse geocode not found")
+    LOGGER.info(
+        "flow=capture_location heading=%.3f tilt=%.3f distance_m=%.1f lat=%.8f lon=%.8f address=%s",
+        response["capture_heading"],
+        response["capture_tilt"],
+        response["capture_distance_m"],
+        target_lat,
+        target_lon,
+        response["capture_address_label"],
+    )
+    return response
+
+
 def output_worker():
     while True:
         response = output_queue.get()
@@ -278,7 +381,9 @@ async def post_position(payload: dict):
         "alt": payload.get("alt", ""),
         "source": payload.get("source", ""),
         "channel": payload.get("channel", ""),
+        "payload_hex": payload.get("payload_hex", ""),
     }
+    response.update(capture_location_from_payload(payload, lat, lon, response["alt"]))
     if not response.get("ok"):
         response["clear_display"] = True
     csv_row = {

@@ -329,6 +329,7 @@ def post_reverse_geocode(config, row):
             "alt": row["alt"],
             "source": "get_heri_gps",
             "channel": row["channel"],
+            "payload_hex": row.get("payload_hex", ""),
         }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")

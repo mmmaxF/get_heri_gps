@@ -13,12 +13,10 @@ UI: `http://<サーバIP>:8010/`
 
 ## ドキュメント
 
-- [Docker構成](docs/docker.md)
+- [ドキュメント入口](docs/README.md)
+- [運用手順](docs/operations.md)
+- [トラブルシュート](docs/troubleshooting.md)
 - [アーキテクチャ](docs/architecture.md)
-- [非同期連携・再送設計（未実装）](docs/reliable-pipeline-design.md)
-- [ワークフロー](docs/workflows.md)
-- [API索引](docs/api.md)
-- [DB定義](docs/database.md)
-- [マルチビューア連携仕様](docs/multiviewer.md)
-- [ATEM PNG出力](docs/containers/atem-output.md)
-- [コンテナ別ドキュメント](docs/containers/)
+- [ATEMスーパー](docs/atem.md)
+- [マルチビューア](docs/multiviewer.md)
+- [API](docs/api.md)
