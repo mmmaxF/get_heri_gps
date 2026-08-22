@@ -7,10 +7,12 @@ import csv
 import json
 import logging
 from logging.handlers import RotatingFileHandler
+import math
 import os
 import queue
 import re
 import shlex
+import smtplib
 import socket
 import subprocess
 import threading
@@ -20,6 +22,7 @@ import urllib.request
 from collections import deque
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +31,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from gps_demodulator import decode_samples
+from gps_demodulator import DEFAULT_BAUD, crc16_x25, decode_samples
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -51,6 +54,13 @@ def env_float(name, default):
         return default
 
 
+def env_bool(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return bool(default)
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 SAMPLE_RATE = env_int("SAMPLE_RATE", 48000)
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = env_int("PORT", 8010)
@@ -59,7 +69,24 @@ DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 ATEM_OUTPUT_HEALTH_URL = os.environ.get("ATEM_OUTPUT_HEALTH_URL", "http://atem-output:8030/api/health")
+ATEM_OUTPUT_FREE_TEXT_URL = os.environ.get("ATEM_OUTPUT_FREE_TEXT_URL", "http://atem-output:8030/api/free-text")
+REVERSE_GEOCODER_HEALTH_PROBE_URL = os.environ.get(
+    "REVERSE_GEOCODER_HEALTH_PROBE_URL",
+    DEFAULT_REVERSE_GEOCODER_URL.replace("/api/position", "/api/health/probe"),
+)
 REVERSE_GEOCODER_TIMEOUT_SECONDS = env_float("REVERSE_GEOCODER_TIMEOUT_SECONDS", 3.0)
+E2E_HEALTH_ENABLED = env_bool("E2E_HEALTH_ENABLED", True)
+E2E_HEALTH_INTERVAL_SECONDS = env_float("E2E_HEALTH_INTERVAL_SECONDS", 300.0)
+E2E_HEALTH_TIMEOUT_SECONDS = env_float("E2E_HEALTH_TIMEOUT_SECONDS", 5.0)
+E2E_HEALTH_NOTIFY_ENABLED = env_bool("E2E_HEALTH_NOTIFY_ENABLED", True)
+E2E_HEALTH_NOTIFY_REPEAT_SECONDS = env_float("E2E_HEALTH_NOTIFY_REPEAT_SECONDS", 1800.0)
+SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
+SMTP_PORT = env_int("SMTP_PORT", 587)
+SMTP_USER = os.environ.get("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_USE_TLS = env_bool("SMTP_USE_TLS", True)
+SMTP_FROM = os.environ.get("SMTP_FROM", "").strip()
+SMTP_TO = os.environ.get("SMTP_TO", "").strip()
 GEOCODE_QUEUE_SIZE = env_int("GEOCODE_QUEUE_SIZE", 100)
 GEOCODE_RETRY_COUNT = env_int("GEOCODE_RETRY_COUNT", 3)
 GEOCODE_RETRY_BASE_SECONDS = env_float("GEOCODE_RETRY_BASE_SECONDS", 1.0)
@@ -72,6 +99,14 @@ CAPTURE_AGENT_CONTROL_SOCKET = os.environ.get(
     "CAPTURE_AGENT_CONTROL_SOCKET",
     "/run/capture-agent/control.sock",
 )
+CONTAINER_RESTART_ENABLED = env_bool("CONTAINER_RESTART_ENABLED", False)
+DOCKER_SOCKET_PATH = os.environ.get("DOCKER_SOCKET_PATH", "/var/run/docker.sock")
+ATEM_OUTPUT_CONTAINER_NAME = os.environ.get("ATEM_OUTPUT_CONTAINER_NAME", "atem_output")
+RESTARTABLE_CONTAINERS = {
+    "get-heri-gps": os.environ.get("GPS_RECEIVER_CONTAINER_NAME", "get_heri_gps"),
+    "reverse-geocoder": os.environ.get("REVERSE_GEOCODER_CONTAINER_NAME", "reverse_geocoder"),
+    "atem-output": ATEM_OUTPUT_CONTAINER_NAME,
+}
 LOG_DIR = Path(os.environ.get("LOG_DIR", "/app/logs"))
 LOG_FILE = os.environ.get("LOG_FILE", "gps_receiver.log")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -306,6 +341,310 @@ class AppState:
 
 STATE = AppState()
 CSV_HEADER = ["time", "source", "channel", "offset_sec", "lon", "lat", "alt", "group", "aircraft", "payload_hex"]
+e2e_health = {
+    "enabled": E2E_HEALTH_ENABLED,
+    "ok": False,
+    "status": "starting" if E2E_HEALTH_ENABLED else "disabled",
+    "checked_at": "",
+    "error": "",
+    "decoded": False,
+    "reverse_geocoder": {},
+    "atem_probe": {},
+    "lat": "",
+    "lon": "",
+    "alt": "",
+    "address": "",
+    "notification": {
+        "enabled": E2E_HEALTH_NOTIFY_ENABLED,
+        "configured": False,
+        "last_sent_at": "",
+        "last_error": "",
+    },
+}
+e2e_health_notify_state = {
+    "last_ok": None,
+    "last_sent_monotonic": 0.0,
+    "last_sent_at": "",
+    "last_error": "",
+}
+
+
+def bcd_byte2(value):
+    value = int(value)
+    return ((value // 10) << 4) | (value % 10)
+
+
+def dms_bcd_bytes(decimal_degrees):
+    degrees = int(decimal_degrees)
+    minutes_float = (decimal_degrees - degrees) * 60.0
+    minutes = int(minutes_float)
+    seconds_float = (minutes_float - minutes) * 60.0
+    seconds = int(seconds_float)
+    centi = int(round((seconds_float - seconds) * 100))
+    if centi >= 100:
+        seconds += 1
+        centi = 0
+    if seconds >= 60:
+        minutes += 1
+        seconds = 0
+    if minutes >= 60:
+        degrees += 1
+        minutes = 0
+    return bytes(
+        [
+            bcd_byte2(degrees // 100),
+            bcd_byte2(degrees % 100),
+            bcd_byte2(minutes),
+            bcd_byte2(seconds),
+            bcd_byte2(centi),
+        ]
+    )
+
+
+def bits_lsb(data):
+    bits = []
+    for byte in data:
+        bits.extend((byte >> bit) & 1 for bit in range(8))
+    return bits
+
+
+def hdlc_bit_stuff(bits):
+    out = []
+    ones = 0
+    for bit in bits:
+        out.append(bit)
+        if bit:
+            ones += 1
+            if ones == 5:
+                out.append(0)
+                ones = 0
+        else:
+            ones = 0
+    return out
+
+
+def build_health_mod_frame(lat=34.693733, lon=135.5023, alt=100):
+    address = b"\x82\xa0\xa4\xa6@@\x60" * 2
+    payload = (
+        b"MOD"
+        + bytes([0x00, 0x01, 0x00, 0x01])
+        + dms_bcd_bytes(lat)
+        + dms_bcd_bytes(lon)
+        + bytes([bcd_byte2(alt // 100), bcd_byte2(alt % 100)])
+        + b"\x00"
+    )
+    frame_without_fcs = address + bytes([0x03, 0xF0]) + b":" + payload
+    fcs = crc16_x25(frame_without_fcs) ^ 0xFFFF
+    frame = frame_without_fcs + bytes([fcs & 0xFF, (fcs >> 8) & 0xFF])
+    flag = [0, 1, 1, 1, 1, 1, 1, 0]
+    return flag + hdlc_bit_stuff(bits_lsb(frame)) + flag
+
+
+def modulate_health_bits(hdlc_bits):
+    raw_bits = [0]
+    for bit in hdlc_bits:
+        raw_bits.append(raw_bits[-1] ^ (1 - int(bit)))
+    samples_per_bit = int(round(SAMPLE_RATE / DEFAULT_BAUD))
+    phase = 0.0
+    amplitude = 12000
+    samples = []
+    for bit in raw_bits:
+        frequency = 1800 if bit else 1200
+        increment = 2.0 * math.pi * frequency / SAMPLE_RATE
+        for _ in range(samples_per_bit):
+            samples.append(int(amplitude * math.sin(phase)))
+            phase += increment
+            if phase >= 2.0 * math.pi:
+                phase -= 2.0 * math.pi
+    return np.asarray(samples, dtype=np.int16)
+
+
+def build_health_pcm_channel():
+    bits = []
+    for _ in range(10):
+        bits.extend(build_health_mod_frame())
+    silence = np.zeros(SAMPLE_RATE, dtype=np.int16)
+    return np.concatenate([silence, modulate_health_bits(bits), silence])
+
+
+def run_e2e_health_check():
+    started = time.monotonic()
+    checked_at = format_japanese_time(now_jst())
+    result = {
+        "enabled": E2E_HEALTH_ENABLED,
+        "ok": False,
+        "status": "checking",
+        "checked_at": checked_at,
+        "duration_seconds": None,
+        "error": "",
+        "decoded": False,
+        "reverse_geocoder": {},
+        "atem_probe": {},
+        "lat": "",
+        "lon": "",
+        "alt": "",
+        "address": "",
+    }
+    try:
+        channel_samples = build_health_pcm_channel()
+        four_channel = np.zeros((len(channel_samples), 4), dtype=np.int16)
+        four_channel[:, 3] = channel_samples
+        fixes = decode_samples(four_channel[:, 3].copy(), 0, sample_rate=SAMPLE_RATE)
+        if not fixes:
+            raise RuntimeError("疑似4ch PCMからGPSを復調できません")
+        fix = fixes[0]
+        result.update(
+            {
+                "decoded": True,
+                "lat": f"{fix.lat:.8f}",
+                "lon": f"{fix.lon:.8f}",
+                "alt": fix.alt,
+            }
+        )
+        payload = {
+            "health_probe": True,
+            "time": checked_at,
+            "lat": float(fix.lat),
+            "lon": float(fix.lon),
+            "alt": fix.alt,
+            "source": "health_probe:pseudo_sdi_4ch",
+            "channel": 4,
+            "payload_hex": fix.payload_hex,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            REVERSE_GEOCODER_HEALTH_PROBE_URL,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=E2E_HEALTH_TIMEOUT_SECONDS) as response:
+            body = response.read(65536)
+        geocode = json.loads(body.decode("utf-8"))
+        atem_probe = geocode.get("atem_probe") or {}
+        result.update(
+            {
+                "ok": bool(geocode.get("ok")) and bool(atem_probe.get("ok")),
+                "status": "ok" if bool(geocode.get("ok")) and bool(atem_probe.get("ok")) else "ng",
+                "reverse_geocoder": geocode,
+                "atem_probe": atem_probe,
+                "address": geocode.get("address_label", ""),
+            }
+        )
+        if not result["ok"]:
+            result["error"] = geocode.get("error") or atem_probe.get("error") or "E2E health probe failed"
+    except Exception as exc:
+        result["status"] = "error"
+        result["error"] = str(exc)
+        LOGGER.warning("flow=e2e_health error=%s", exc)
+    result["duration_seconds"] = round(time.monotonic() - started, 3)
+    result["notification"] = notification_status()
+    return result
+
+
+def notification_configured():
+    return bool(SMTP_HOST and SMTP_FROM and SMTP_TO)
+
+
+def notification_status():
+    return {
+        "enabled": E2E_HEALTH_NOTIFY_ENABLED,
+        "configured": notification_configured(),
+        "last_sent_at": e2e_health_notify_state.get("last_sent_at", ""),
+        "last_error": e2e_health_notify_state.get("last_error", ""),
+        "repeat_seconds": E2E_HEALTH_NOTIFY_REPEAT_SECONDS,
+    }
+
+
+def send_e2e_health_email(result, recovered=False):
+    if not E2E_HEALTH_NOTIFY_ENABLED:
+        return False, "notification disabled"
+    if not notification_configured():
+        return False, "SMTP未設定"
+    state = "復旧" if recovered else "NG"
+    subject = f"[get_heri_gps] E2Eヘルスチェック{state}"
+    body = "\n".join(
+        [
+            f"E2Eヘルスチェック: {state}",
+            f"確認時刻: {result.get('checked_at', '')}",
+            f"status: {result.get('status', '')}",
+            f"ok: {result.get('ok')}",
+            f"decoded: {result.get('decoded')}",
+            f"address: {result.get('address', '')}",
+            f"lat/lon/alt: {result.get('lat', '')}, {result.get('lon', '')}, {result.get('alt', '')}",
+            f"error: {result.get('error', '')}",
+            "",
+            "reverse_geocoder:",
+            json.dumps(result.get("reverse_geocoder", {}), ensure_ascii=False, indent=2),
+            "",
+            "atem_probe:",
+            json.dumps(result.get("atem_probe", {}), ensure_ascii=False, indent=2),
+        ]
+    )
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = SMTP_FROM
+    message["To"] = SMTP_TO
+    message.set_content(body)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
+            if SMTP_USE_TLS:
+                smtp.starttls()
+            if SMTP_USER:
+                smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.send_message(message)
+        e2e_health_notify_state["last_error"] = ""
+        return True, ""
+    except Exception as exc:
+        LOGGER.warning("flow=e2e_health notify_error error=%s", exc)
+        return False, str(exc)
+
+
+def maybe_notify_e2e_health(result):
+    now = time.monotonic()
+    previous_ok = e2e_health_notify_state.get("last_ok")
+    current_ok = bool(result.get("ok"))
+    should_send = False
+    recovered = False
+    if not current_ok:
+        elapsed = now - float(e2e_health_notify_state.get("last_sent_monotonic") or 0.0)
+        should_send = previous_ok is not False or elapsed >= E2E_HEALTH_NOTIFY_REPEAT_SECONDS
+    elif previous_ok is False:
+        should_send = True
+        recovered = True
+    e2e_health_notify_state["last_ok"] = current_ok
+    if not should_send:
+        result["notification"] = notification_status()
+        return
+    sent, error = send_e2e_health_email(result, recovered=recovered)
+    if sent:
+        e2e_health_notify_state["last_sent_monotonic"] = now
+        e2e_health_notify_state["last_sent_at"] = format_japanese_time(now_jst())
+    e2e_health_notify_state["last_error"] = error
+    result["notification"] = notification_status()
+
+
+def e2e_health_main():
+    global e2e_health
+    if not E2E_HEALTH_ENABLED:
+        return
+    while True:
+        result = run_e2e_health_check()
+        maybe_notify_e2e_health(result)
+        with STATE.lock:
+            e2e_health = result
+        LOGGER.info(
+            "flow=e2e_health status=%s ok=%s decoded=%s address=%s error=%s",
+            result.get("status"),
+            result.get("ok"),
+            result.get("decoded"),
+            result.get("address"),
+            result.get("error"),
+        )
+        time.sleep(max(5.0, E2E_HEALTH_INTERVAL_SECONDS))
+
+
+threading.Thread(target=e2e_health_main, daemon=True, name="e2e-health").start()
 
 
 def post_reverse_geocode(config, row):
@@ -930,6 +1269,80 @@ def list_capture_devices():
     return devices
 
 
+def docker_engine_request(method, path, timeout=15.0):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(DOCKER_SOCKET_PATH)
+        request = (
+            f"{method} {path} HTTP/1.1\r\n"
+            "Host: docker\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8")
+        sock.sendall(request)
+        chunks = []
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        sock.close()
+    raw = b"".join(chunks)
+    header, _, body = raw.partition(b"\r\n\r\n")
+    status_line = header.splitlines()[0].decode("iso-8859-1", errors="replace") if header else ""
+    parts = status_line.split(" ", 2)
+    status_code = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 0
+    text = body.decode("utf-8", errors="replace").strip()
+    if status_code >= 400 or status_code == 0:
+        raise RuntimeError(text or status_line or "Docker Engine API request failed")
+    return {"status_code": status_code, "body": text}
+
+
+def restart_container(container_key):
+    if not CONTAINER_RESTART_ENABLED:
+        raise RuntimeError("コンテナ再起動APIが無効です")
+    container_name = RESTARTABLE_CONTAINERS.get(container_key)
+    if not container_name:
+        raise RuntimeError(f"再起動対象外のコンテナです: {container_key}")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", container_name):
+        raise RuntimeError(f"コンテナ名が不正です: {container_name}")
+    if not Path(DOCKER_SOCKET_PATH).exists():
+        raise RuntimeError(f"Docker socket が見つかりません: {DOCKER_SOCKET_PATH}")
+    return docker_engine_request(
+        "POST",
+        f"/containers/{container_name}/restart?t=10",
+        timeout=20.0,
+    )
+
+
+def restart_container_async(container_key):
+    container_name = RESTARTABLE_CONTAINERS.get(container_key, container_key)
+
+    def run():
+        time.sleep(0.2)
+        try:
+            result = restart_container(container_key)
+            LOGGER.warning(
+                "flow=system action=restart_container target=%s container=%s status_code=%s",
+                container_key,
+                container_name,
+                result.get("status_code"),
+            )
+        except Exception as exc:
+            LOGGER.exception(
+                "flow=system action=restart_container_failed target=%s container=%s error=%s",
+                container_key,
+                container_name,
+                exc,
+            )
+
+    thread = threading.Thread(target=run, daemon=True, name=f"restart-{container_key}")
+    thread.start()
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
@@ -975,6 +1388,7 @@ def system_status():
     latest_fix = receiver.get("latest") or {}
     latest_multiviewer = reverse_latest.get("multiviewer") or {}
     return {
+        "e2e_health": dict(e2e_health),
         "gps_receiver": {
             "ok": bool(receiver["running"]),
             "status": receiver["status"],
@@ -1038,9 +1452,57 @@ def system_status():
             "atem_enabled": bool(atem_body.get("atem_enabled")),
             "atem_host": atem_body.get("atem_host", ""),
             "image_exists": bool(atem_body.get("image_exists")),
+            "super_health": atem_body.get("super_health", {}),
             "latest": atem_body.get("latest", {}),
         },
     }
+
+
+@app.post("/api/system/health/e2e")
+def run_e2e_health_now():
+    global e2e_health
+    result = run_e2e_health_check()
+    maybe_notify_e2e_health(result)
+    with STATE.lock:
+        e2e_health = result
+    return result
+
+
+@app.post("/api/system/atem/free-text")
+def send_atem_free_text(payload: dict):
+    text = str(payload.get("text", ""))
+    clear_display = bool(payload.get("clear_display")) or text == ""
+    body = json.dumps(
+        {
+            "text": "" if clear_display else text,
+            "clear_display": clear_display,
+            "time": format_japanese_time(now_jst()),
+            "source": "ui_free_text",
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        ATEM_OUTPUT_FREE_TEXT_URL,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5.0) as response:
+            response_body = response.read(65536)
+        result = json.loads(response_body.decode("utf-8"))
+        LOGGER.warning(
+            "flow=system action=atem_free_text clear_display=%s text=%s queued=%s sent=%s error=%s",
+            clear_display,
+            text,
+            result.get("upload_queued"),
+            result.get("sent"),
+            result.get("error", ""),
+        )
+        return result
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        LOGGER.warning("flow=system action=atem_free_text_failed error=%s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
 
 
 @app.get("/api/capture-agent/status")
@@ -1066,6 +1528,35 @@ def capture_agent_start():
 @app.post("/api/capture-agent/stop")
 def capture_agent_stop():
     return request_capture_agent("/api/stop", method="POST", payload={})
+
+
+@app.post("/api/system/containers/{container_key}/restart")
+def restart_system_container(container_key: str):
+    try:
+        container_name = RESTARTABLE_CONTAINERS.get(container_key)
+        if not container_name:
+            return JSONResponse(
+                {"ok": False, "target": container_key, "error": "再起動対象外のコンテナです"},
+                status_code=404,
+            )
+        restart_container_async(container_key)
+        return {
+            "ok": True,
+            "target": container_key,
+            "container": container_name,
+            "message": f"{container_key} コンテナの再起動を開始しました",
+        }
+    except Exception as exc:
+        LOGGER.exception("flow=system action=restart_container_failed target=%s error=%s", container_key, exc)
+        return JSONResponse(
+            {"ok": False, "target": container_key, "error": str(exc)},
+            status_code=500,
+        )
+
+
+@app.post("/api/system/atem-output/restart")
+def restart_atem_output():
+    return restart_system_container("atem-output")
 
 
 @app.get("/api/devices")

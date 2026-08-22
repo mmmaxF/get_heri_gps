@@ -125,7 +125,7 @@ function renderServiceDetails(id, entries) {
     const group = document.createElement("div");
     const term = document.createElement("dt");
     const description = document.createElement("dd");
-    if (["最新ログ", "CSV", "マルチビューアー"].includes(label)) {
+    if (["最新ログ", "CSV", "マルチビューアー", "E2Eヘルス", "E2E通知"].includes(label)) {
       group.classList.add("wide-detail");
     }
     term.textContent = label;
@@ -135,15 +135,31 @@ function renderServiceDetails(id, entries) {
   }
 }
 
+function healthReasonLabel(reason) {
+  return {
+    png_output_dir_writable: "PNG出力先に書き込めない",
+    latest_image_exists: "最新PNGがない",
+    atem_enabled: "ATEM送信が無効",
+    atem_host_configured: "ATEM IP未設定",
+    upload_worker_alive: "送信ワーカー停止",
+    upload_worker_not_stuck: "送信ワーカー詰まり",
+    last_atem_send_success: "ATEM送信成功履歴なし",
+    last_success_recent: "直近の送信成功が古い",
+    png_generation: "PNG生成失敗",
+  }[reason] || reason;
+}
+
 async function refreshSystemStatus() {
   try {
     const response = await fetch("/api/system/status");
     const status = await response.json();
+    const e2e = status.e2e_health || {};
     const capture = status.capture_agent || {};
     const receiver = status.gps_receiver || {};
     const geocoder = status.reverse_geocoder || {};
     const atem = status.atem_output || {};
     const atemLatest = atem.latest || {};
+    const atemSuper = atem.super_health || {};
     setServiceStatus(
       "captureServiceStatus",
       capture.ok && capture.running,
@@ -181,6 +197,12 @@ async function refreshSystemStatus() {
       ["最新ログ", capture.output?.last_log],
     ]);
     renderServiceDetails("receiverServiceDetails", [
+      ["E2Eヘルス", e2e.ok ? `OK・${e2e.address || "-"}・${e2e.checked_at || ""}` : `NG・${e2e.error || e2e.status || "未確認"}`],
+      ["E2E通知", e2e.notification?.enabled === false
+        ? "無効"
+        : e2e.notification?.configured
+          ? `有効${e2e.notification?.last_sent_at ? `・最終通知 ${e2e.notification.last_sent_at}` : ""}${e2e.notification?.last_error ? `・通知エラー ${e2e.notification.last_error}` : ""}`
+          : "SMTP未設定"],
       ["入力元", receiver.input?.client],
       ["入力形式", `${receiver.input?.sample_rate || "-"} Hz / ${receiver.input?.channels || "-"}ch`],
       ["対象", `GPS CH${receiver.input?.gps_channel || "-"}`],
@@ -212,8 +234,23 @@ async function refreshSystemStatus() {
         : atemLatest.sent
           ? "送信成功"
           : "待機中";
+    const atemSuperText = atemSuper.ready
+      ? atemSuper.visible_now
+        ? "OK・現在スーパー表示中"
+        : "OK・表示クリア中/空文字"
+      : `NG: ${(atemSuper.reasons || []).map(healthReasonLabel).join(", ") || atemSuper.latest_error || "不明"}`;
+    const atemProbe = atemSuper.active_probe || {};
+    const atemProbeText = atemProbe.enabled === false
+      ? "無効"
+      : atemProbe.last_success_at
+        ? `有効・最終成功 ${atemProbe.last_success_at}`
+        : atemProbe.last_attempt_at
+          ? `有効・最終試行 ${atemProbe.last_attempt_at}${atemProbe.last_error ? ` / ${atemProbe.last_error}` : ""}`
+          : "有効・成功待ち";
     renderServiceDetails("atemServiceDetails", [
       ["ATEM接続", atem.atem_enabled ? `${atem.atem_host || "-"}（有効）` : "無効・PNG生成のみ"],
+      ["スーパー可否", atemSuperText],
+      ["自動ヘルス送信", atemProbeText],
       ["最新テキスト", atemLatest.text],
       ["更新時刻", atemLatest.updated_at],
       ["PNG", atem.image_exists ? "生成済み" : "未生成"],
@@ -223,6 +260,106 @@ async function refreshSystemStatus() {
     $("systemCheckedAt").textContent = `最終確認 ${formatClock(new Date())}`;
   } catch (error) {
     $("systemCheckedAt").textContent = "状態を取得できません";
+  }
+}
+
+async function restartContainer(containerName, button) {
+  const status = $(`restartStatus-${containerName}`);
+  const label = {
+    "get-heri-gps": "get-heri-gps（UI/API本体）",
+    "reverse-geocoder": "reverse-geocoder（地名変換）",
+    "atem-output": "atem-output（ATEMテロップ送信）",
+  }[containerName] || containerName;
+  if (!confirm(`${label} コンテナを再起動します。一時的に処理が止まります。実行しますか？`)) {
+    return;
+  }
+  button.disabled = true;
+  status.textContent = "再起動中...";
+  try {
+    const response = await fetch(`/api/system/containers/${encodeURIComponent(containerName)}/restart`, {method: "POST"});
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || "再起動に失敗しました");
+    }
+    status.textContent = "再起動を開始しました";
+    setTimeout(refreshSystemStatus, 2500);
+  } catch (error) {
+    if (containerName === "get-heri-gps") {
+      status.textContent = "再起動要求を送信しました";
+      setTimeout(refreshSystemStatus, 4000);
+    } else {
+      status.textContent = error.message;
+    }
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+    }, 5000);
+  }
+}
+
+async function runE2eHealthNow() {
+  const button = $("e2eHealthBtn");
+  const status = $("e2eHealthStatus");
+  button.disabled = true;
+  status.textContent = "確認中...";
+  try {
+    const response = await fetch("/api/system/health/e2e", {method: "POST"});
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || "E2EヘルスNG");
+    }
+    status.textContent = `OK・${data.address || "-"}`;
+    setTimeout(refreshSystemStatus, 500);
+  } catch (error) {
+    status.textContent = error.message;
+    setTimeout(refreshSystemStatus, 500);
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+    }, 3000);
+  }
+}
+
+async function sendAtemFreeText(clearDisplay = false) {
+  const input = $("atemFreeTextInput");
+  const status = $("atemFreeTextStatus");
+  const sendButton = $("atemFreeTextSendBtn");
+  const clearButton = $("atemFreeTextClearBtn");
+  const text = clearDisplay ? "" : input.value;
+  if (!clearDisplay && !text.trim()) {
+    status.textContent = "送信する文字を入力してください";
+    return;
+  }
+  const confirmText = clearDisplay
+    ? "ATEMスーパーをクリアします。実行しますか？"
+    : `以下の文字をATEMへスーパーします。\n\n${text}\n\n実行しますか？`;
+  if (!confirm(confirmText)) return;
+  sendButton.disabled = true;
+  clearButton.disabled = true;
+  status.textContent = clearDisplay ? "クリア送信中..." : "送信中...";
+  try {
+    const response = await fetch("/api/system/atem/free-text", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text, clear_display: clearDisplay}),
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || "ATEM送信に失敗しました");
+    }
+    status.textContent = data.upload_queued
+      ? `送信待ちに入れました: ${data.text || "クリア"}`
+      : data.sent
+        ? `送信しました: ${data.text || "クリア"}`
+        : `受付しました: ${data.text || "クリア"}`;
+    setTimeout(refreshSystemStatus, 1500);
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    setTimeout(() => {
+      sendButton.disabled = false;
+      clearButton.disabled = false;
+    }, 3000);
   }
 }
 
@@ -402,6 +539,12 @@ $("agentStopBtn").addEventListener("click", async () => {
     $("agentStatus").textContent = error.message;
   }
 });
+for (const button of document.querySelectorAll(".container-restart-btn")) {
+  button.addEventListener("click", () => restartContainer(button.dataset.container, button));
+}
+$("e2eHealthBtn").addEventListener("click", runE2eHealthNow);
+$("atemFreeTextSendBtn").addEventListener("click", () => sendAtemFreeText(false));
+$("atemFreeTextClearBtn").addEventListener("click", () => sendAtemFreeText(true));
 
 updateClock();
 setInterval(updateClock, 1000);

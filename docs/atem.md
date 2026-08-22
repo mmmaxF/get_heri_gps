@@ -164,11 +164,13 @@ ATEM_FILL_SOURCE=3010
 ATEM_KEY_SOURCE=3011
 ATEM_ON_AIR=1
 ATEM_UPLOAD_COMPRESS=1
-ATEM_PERSISTENT_CONNECTION=1
+ATEM_PERSISTENT_CONNECTION=0
 ATEM_ASYNC_UPLOAD=1
 ```
 
 `ATEM_ASYNC_UPLOAD=1` の場合、HTTP APIはPNG生成とジョブ投入だけ行い、ATEM送信はworker threadが行います。未送信の古いPNGは削除し、最新だけ送ります。
+
+`ATEM_PERSISTENT_CONNECTION=0` の場合、ATEM送信は毎回タイムアウト付きのサブプロセスで実行します。少し遅くなりますが、ATEM通信が固着しても送信プロセスだけが終了し、workerが戻りやすくなります。
 
 ## 反映
 

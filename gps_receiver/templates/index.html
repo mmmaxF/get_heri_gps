@@ -130,6 +130,10 @@
               <span>Dockerコンテナ</span>
               <strong>get-heri-gps</strong>
               <em id="receiverServiceStatus">確認中</em>
+              <button id="e2eHealthBtn" class="small-action" type="button">E2Eヘルス確認</button>
+              <small id="e2eHealthStatus"></small>
+              <button class="danger small-action container-restart-btn" type="button" data-container="get-heri-gps">コンテナ再起動</button>
+              <small id="restartStatus-get-heri-gps"></small>
             </div>
             <dl id="receiverServiceDetails"></dl>
           </div>
@@ -138,6 +142,8 @@
               <span>Dockerコンテナ</span>
               <strong>reverse-geocoder</strong>
               <em id="geocoderServiceStatus">確認中</em>
+              <button class="danger small-action container-restart-btn" type="button" data-container="reverse-geocoder">コンテナ再起動</button>
+              <small id="restartStatus-reverse-geocoder"></small>
             </div>
             <dl id="geocoderServiceDetails"></dl>
           </div>
@@ -146,8 +152,23 @@
               <span>Dockerコンテナ</span>
               <strong>atem-output</strong>
               <em id="atemServiceStatus">確認中</em>
+              <button class="danger small-action container-restart-btn" type="button" data-container="atem-output">コンテナ再起動</button>
+              <small id="restartStatus-atem-output"></small>
             </div>
-            <dl id="atemServiceDetails"></dl>
+            <div class="service-body">
+              <dl id="atemServiceDetails"></dl>
+              <div class="atem-free-text">
+                <label>
+                  <span>ATEMテスト用フリーテキスト</span>
+                  <textarea id="atemFreeTextInput" rows="2" placeholder="ここに入力した文字をそのままスーパーします"></textarea>
+                </label>
+                <div class="inline-actions">
+                  <button id="atemFreeTextSendBtn" class="primary" type="button">フリーテキスト送信</button>
+                  <button id="atemFreeTextClearBtn" type="button">クリア送信</button>
+                </div>
+                <small id="atemFreeTextStatus"></small>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -211,6 +232,6 @@
         </div>
       </section>
     </main>
-    <script src="/static/app.js?v=20260716-atem-output-v1"></script>
+    <script src="/static/app.js?v=20260821-atem-free-text-v1"></script>
   </body>
 </html>

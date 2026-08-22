@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import csv
+import json
 import logging
 from logging.handlers import RotatingFileHandler
 import math
@@ -9,6 +10,8 @@ import os
 import queue
 import re
 import threading
+import urllib.error
+import urllib.request
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +35,8 @@ LOG_MAX_BYTES = int(float(os.environ.get("LOG_MAX_BYTES", 5 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(float(os.environ.get("LOG_BACKUP_COUNT", 5)))
 OUTPUT_QUEUE_SIZE = int(float(os.environ.get("OUTPUT_QUEUE_SIZE", 10)))
 CSV_RETENTION_DAYS = int(float(os.environ.get("CSV_RETENTION_DAYS", 90)))
+ATEM_OUTPUT_PROBE_URL = os.environ.get("ATEM_OUTPUT_PROBE_URL", "http://atem-output:8030/api/probe")
+ATEM_OUTPUT_PROBE_TIMEOUT_SECONDS = float(os.environ.get("ATEM_OUTPUT_PROBE_TIMEOUT_SECONDS", "3.0"))
 JST = timezone(timedelta(hours=9))
 CAPTURE_LOCATION_ENABLED = os.environ.get("CAPTURE_LOCATION_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 CAPTURE_CAMERA_HEADING_BCD_OFFSET = int(float(os.environ.get("CAPTURE_CAMERA_HEADING_BCD_OFFSET", "31")))
@@ -325,6 +330,58 @@ def get_latest():
 def get_history():
     with lock:
         return {"items": list(history)}
+
+
+def post_atem_probe(response):
+    if not ATEM_OUTPUT_PROBE_URL.strip():
+        return {"ok": False, "skipped": True, "reason": "ATEM_OUTPUT_PROBE_URL is empty"}
+    data = json.dumps(response, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        ATEM_OUTPUT_PROBE_URL,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=ATEM_OUTPUT_PROBE_TIMEOUT_SECONDS) as res:
+            body = res.read(65536)
+        return json.loads(body.decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc), "url": ATEM_OUTPUT_PROBE_URL}
+
+
+@app.post("/api/health/probe")
+def health_probe(payload: dict):
+    try:
+        lat = float(payload["lat"])
+        lon = float(payload["lon"])
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse({"ok": False, "health_probe": True, "error": "lat/lon required"}, status_code=400)
+    result = geocoder.reverse(lat, lon)
+    response = {
+        **result,
+        "health_probe": True,
+        "time": payload.get("time", ""),
+        "lat": lat,
+        "lon": lon,
+        "alt": payload.get("alt", ""),
+        "source": payload.get("source", ""),
+        "channel": payload.get("channel", ""),
+        "payload_hex": payload.get("payload_hex", ""),
+    }
+    response.update(capture_location_from_payload(payload, lat, lon, response["alt"]))
+    if not response.get("ok"):
+        response["clear_display"] = True
+    response["atem_probe"] = post_atem_probe(response)
+    LOGGER.info(
+        "flow=geocoder health_probe ok=%s address=%s atem_probe_ok=%s lat=%.8f lon=%.8f",
+        response.get("ok"),
+        response.get("address_label", ""),
+        response.get("atem_probe", {}).get("ok"),
+        lat,
+        lon,
+    )
+    return response
 
 
 @app.post("/api/position")

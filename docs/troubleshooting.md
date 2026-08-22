@@ -46,6 +46,21 @@ PY
 
 現在は `ATEM_ASYNC_UPLOAD=1` なので、ATEM送信が重くてもAPIは詰まりにくい構成です。
 
+送信workerが `active=true` のまま長時間戻らない場合は、ATEM通信が固着しています。まず `atem-output` を再起動してください。
+
+```bash
+docker compose up -d --force-recreate atem-output
+```
+
+恒久対策として、通常運用では以下を推奨します。
+
+```env
+ATEM_ASYNC_UPLOAD=1
+ATEM_PERSISTENT_CONNECTION=0
+```
+
+`ATEM_PERSISTENT_CONNECTION=0` にすると、ATEM送信をタイムアウト付きサブプロセスで実行するため、in-process接続の固着に巻き込まれにくくなります。
+
 ## ATEMにスーパーされない
 
 確認:
