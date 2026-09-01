@@ -17,10 +17,6 @@ services:
     ports:
       - "${GPS_RECEIVER_PORT:-8010}:${GPS_RECEIVER_PORT:-8010}"
       - "${GPS_PCM_SOCKET_PORT:-9010}:${GPS_PCM_SOCKET_PORT:-9010}"
-    devices:
-      - "/dev/snd:/dev/snd"
-    group_add:
-      - "audio"
     volumes:
       - "${HOST_GPS_OUTPUT_DIR:-./gps_receiver/output}:/app/output"
       - "${HOST_GPS_LOG_DIR:-./gps_receiver/logs}:/app/logs"

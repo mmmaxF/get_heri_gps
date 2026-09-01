@@ -11,7 +11,6 @@ import math
 import os
 import queue
 import re
-import shlex
 import smtplib
 import socket
 import subprocess
@@ -65,7 +64,6 @@ SAMPLE_RATE = env_int("SAMPLE_RATE", 48000)
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = env_int("PORT", 8010)
 DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positions.csv"))
-DEFAULT_INPUT_DEVICE = os.environ.get("INPUT_DEVICE", "hw:2,0")
 DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 ATEM_OUTPUT_HEALTH_URL = os.environ.get("ATEM_OUTPUT_HEALTH_URL", "http://atem-output:8030/api/health")
@@ -113,11 +111,6 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 LOG_MAX_BYTES = env_int("LOG_MAX_BYTES", 5 * 1024 * 1024)
 LOG_BACKUP_COUNT = env_int("LOG_BACKUP_COUNT", 5)
 LOG_PROGRESS_SECONDS = env_float("LOG_PROGRESS_SECONDS", 5.0)
-CAPTURE_DEVICE_INCLUDE_KEYWORDS = [
-    item.strip().lower()
-    for item in os.environ.get("CAPTURE_DEVICE_INCLUDE_KEYWORDS", "AJA,U-TAP,Blackmagic,DeckLink,UltraStudio,SDI,MS2109,USB Audio").split(",")
-    if item.strip()
-]
 def setup_logger():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("gps_receiver")
@@ -158,8 +151,6 @@ class RuntimeConfig:
     mode: str = "socket"
     gps_channel: int = env_int("GPS_CHANNEL", 4)
     input_channels: int = DEFAULT_INPUT_CHANNELS
-    input_device: str = DEFAULT_INPUT_DEVICE
-    input_command: str = os.environ.get("INPUT_COMMAND", f"arecord -D {DEFAULT_INPUT_DEVICE} -f S16_LE -r {SAMPLE_RATE} -c {DEFAULT_INPUT_CHANNELS} -t raw")
     pcm_socket_host: str = PCM_SOCKET_HOST
     pcm_socket_port: int = PCM_SOCKET_PORT
     test_capture_dir: str = os.environ.get("TEST_CAPTURE_DIR", "../audio_capture/20260613_132355")
@@ -226,8 +217,6 @@ class AppState:
     def set_config(self, values):
         with self.lock:
             values = dict(values)
-            if not values.get("mode"):
-                values["mode"] = "command"
             normalized = {}
             for key, val in values.items():
                 if hasattr(self.config, key):
@@ -243,8 +232,10 @@ class AppState:
                         if not path.is_absolute():
                             path = BASE_DIR / path
                         val = str(path)
-                    if key == "input_device" and val:
-                        normalized["input_command"] = build_arecord_command(val, int(values.get("input_channels", self.config.input_channels)))
+                    if key == "mode":
+                        val = val.strip().lower()
+                        if val not in {"socket", "test"}:
+                            raise ValueError("mode must be 'socket' or 'test'")
                     normalized[key] = val
             if self.running:
                 changed = [key for key, val in normalized.items() if getattr(self.config, key) != val]
@@ -947,38 +938,6 @@ def iter_test_chunks(config, stop_event):
             time.sleep(len(arr) / SAMPLE_RATE)
 
 
-def iter_command_chunks(config, stop_event):
-    command = config.input_command.strip() or build_arecord_command(config.input_device, config.input_channels)
-    if not command:
-        raise RuntimeError("INPUT_COMMAND is empty")
-    cmd = shlex.split(command)
-    LOGGER.info("flow=input mode=sdi command=%s gps_channel=%s input_channels=%s sample_rate=%s", command, config.gps_channel, config.input_channels, SAMPLE_RATE)
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    source = command
-    start_time = now_jst()
-    chunk_frames = int(SAMPLE_RATE * 0.25)
-    bytes_per_chunk = chunk_frames * config.input_channels * 2
-    try:
-        while not stop_event.is_set():
-            data = proc.stdout.read(bytes_per_chunk)
-            if not data:
-                break
-            arr = np.frombuffer(data, dtype="<i2")
-            frames = len(arr) // config.input_channels
-            if frames <= 0:
-                continue
-            arr = arr[: frames * config.input_channels].reshape(-1, config.input_channels)
-            ch_index = max(0, min(config.gps_channel - 1, config.input_channels - 1))
-            yield arr[:, ch_index].copy(), source, start_time
-    finally:
-        LOGGER.info("flow=input stop command=%s", command)
-        proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-
-
 def recv_until_newline(conn, max_bytes):
     data = bytearray()
     while len(data) < max_bytes:
@@ -1087,7 +1046,7 @@ def iter_socket_chunks(config, stop_event):
 def worker_main():
     STATE.mark_started()
     config = STATE.config
-    config.mode = "socket"
+    mode = config.mode.strip().lower()
     writer = CsvWriter(config.output_csv)
     geocode_queue = queue.Queue(maxsize=GEOCODE_QUEUE_SIZE)
     geocode_done = threading.Event()
@@ -1103,13 +1062,17 @@ def worker_main():
     last_new_fix_at = time.monotonic()
     decode_unavailable_notified = False
     LOGGER.info(
-        "flow=worker start mode=socket listen=%s:%s output_csv=%s",
-        config.pcm_socket_host,
-        config.pcm_socket_port,
+        "flow=worker start mode=%s output_csv=%s",
+        mode,
         config.output_csv,
     )
     try:
-        source_iter = iter_socket_chunks(config, STATE.stop_event)
+        if mode == "socket":
+            source_iter = iter_socket_chunks(config, STATE.stop_event)
+        elif mode == "test":
+            source_iter = iter_test_chunks(config, STATE.stop_event)
+        else:
+            raise ValueError("mode must be 'socket' or 'test'")
         source_name = ""
         source_start = now_jst()
         for chunk, source_name, source_start in source_iter:
@@ -1241,32 +1204,6 @@ def stop_pcm_receiver():
     worker = STATE.worker
     if worker and worker.is_alive():
         worker.join(timeout=3)
-
-
-def build_arecord_command(device, channels):
-    return f"arecord -D {device} -f S16_LE -r {SAMPLE_RATE} -c {channels} -t raw"
-
-
-def list_capture_devices():
-    devices = []
-    try:
-        proc = subprocess.run(["arecord", "-l"], text=True, capture_output=True, timeout=3)
-    except Exception:
-        return devices
-    if proc.returncode != 0:
-        return devices
-    pat = re.compile(r"card (\d+): ([^\[]+) \[([^\]]+)\], device (\d+): ([^\[]+) \[([^\]]+)\]")
-    for line in proc.stdout.splitlines():
-        m = pat.search(line)
-        if not m:
-            continue
-        card, card_id, card_name, dev, dev_id, dev_name = m.groups()
-        hw = f"hw:{card},{dev}"
-        label = f"{card_name} / {dev_name} ({hw})"
-        if CAPTURE_DEVICE_INCLUDE_KEYWORDS and not any(keyword in label.lower() for keyword in CAPTURE_DEVICE_INCLUDE_KEYWORDS):
-            continue
-        devices.append({"device": hw, "label": label, "card": int(card), "subdevice": int(dev), "default_channels": 2})
-    return devices
 
 
 def docker_engine_request(method, path, timeout=15.0):
@@ -1552,16 +1489,6 @@ def restart_system_container(container_key: str):
             {"ok": False, "target": container_key, "error": str(exc)},
             status_code=500,
         )
-
-
-@app.post("/api/system/atem-output/restart")
-def restart_atem_output():
-    return restart_system_container("atem-output")
-
-
-@app.get("/api/devices")
-def devices():
-    return {"devices": list_capture_devices()}
 
 
 @app.post("/api/config")

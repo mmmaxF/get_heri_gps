@@ -9,8 +9,6 @@ reverse_geocoder/output/
 reverse_geocoder/logs/
 atem_output/output/
 atem_output/logs/
-telop_output/config/*.json
-telop_output/logs/
 gps_receiver/input/*
 !gps_receiver/input/.gitkeep
 .env
