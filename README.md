@@ -5,7 +5,7 @@ SDI/HDMIキャプチャの音声チャンネルからGPS/MOD信号を復調し�
 ## 最短起動
 
 ```bash
-cd /home/ubuntu/app/hericheck/get_heri_gps
+cd /path/to/get_heri_gps
 ./start.sh
 ```
 

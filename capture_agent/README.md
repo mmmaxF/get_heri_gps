@@ -21,7 +21,7 @@ SDIキャプチャ機器
 ## 制御APIを起動
 
 ```bash
-cd /home/ubuntu/app/hericheck/get_heri_gps/capture_agent
+cd /path/to/get_heri_gps/capture_agent
 ./start.sh
 ```
 

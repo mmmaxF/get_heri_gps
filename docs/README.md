@@ -22,8 +22,3 @@
 |---|---|
 | 全体構成、スレッド、データ流れ | [architecture.md](architecture.md) |
 | API一覧、curl例 | [api.md](api.md) |
-
-## 旧ドキュメント
-
-整理前の詳細ドキュメントは [archive/old-docs/](archive/old-docs/) に退避しています。
-

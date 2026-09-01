@@ -5,7 +5,7 @@
 作業場所:
 
 ```bash
-cd /home/vega/app/get_heri_gps
+cd /path/to/get_heri_gps
 ```
 
 状態確認:
@@ -94,4 +94,3 @@ ATEM側:
 curl -s http://127.0.0.1:8030/api/latest | python3 -m json.tool
 curl -s http://127.0.0.1:8030/api/preview.png -o /tmp/atem_preview.png
 ```
-
