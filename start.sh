@@ -57,6 +57,20 @@ mkdir -p "$(env_value HOST_ATEM_LOG_DIR ./atem_output/logs)"
 echo "既存のget_heri_gps Dockerコンテナを削除します..."
 docker compose down --remove-orphans
 
+if [[ -d capture_agent/run && ! -w capture_agent/run ]]; then
+  rmdir capture_agent/run
+fi
+mkdir -p capture_agent/run
+
+CAPTURE_AGENT_LOG="${CAPTURE_AGENT_LOG:-${PWD}/capture_agent/run/control-api.log}"
+
+if [[ ! -f capture_agent/.env ]]; then
+  cp capture_agent/.env.example capture_agent/.env
+  echo "capture_agent/.env がなかったため .env.example から作成しました。"
+fi
+
+python3 ./capture_agent/restart_control.py --log "${CAPTURE_AGENT_LOG}"
+
 echo "get_heri_gps Dockerコンテナを再作成・起動します..."
 docker compose up -d --build --remove-orphans
 

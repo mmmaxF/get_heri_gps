@@ -122,6 +122,7 @@ def stream_once(config: dict) -> None:
             "sample_format": config["sample_format"],
             "channels": config["channels"],
             "gps_channel": config["gps_channel"],
+            "telemetry_format": config["telemetry_format"],
             "agent_name": config["agent_name"],
         }
         conn.sendall(json.dumps(header, ensure_ascii=True).encode("utf-8") + b"\n")
@@ -178,7 +179,10 @@ def make_config(args: argparse.Namespace) -> dict:
     sample_format = os.environ.get("SAMPLE_FORMAT", "S16_LE")
     if sample_format != "S16_LE":
         raise ValueError("現在対応しているSAMPLE_FORMATはS16_LEだけです")
-    gps_channel = env_int("GPS_CHANNEL", 4)
+    gps_channel = env_int("GPS_CHANNEL", 3)
+    telemetry_format = os.environ.get("TELEMETRY_FORMAT", "nnn")
+    if telemetry_format not in {"nnn", "mapsystem"}:
+        raise ValueError("TELEMETRY_FORMAT must be nnn or mapsystem")
     if channels < 1:
         raise ValueError("INPUT_CHANNELS must be at least 1")
     if not 1 <= gps_channel <= channels:
@@ -199,6 +203,7 @@ def make_config(args: argparse.Namespace) -> dict:
         "sample_format": sample_format,
         "channels": channels,
         "gps_channel": gps_channel,
+        "telemetry_format": telemetry_format,
         "agent_name": os.environ.get("AGENT_NAME", socket.gethostname()),
         "connect_timeout": env_float("CONNECT_TIMEOUT_SECONDS", 5.0),
         "reconnect_seconds": env_float("RECONNECT_SECONDS", 3.0),

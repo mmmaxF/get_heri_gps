@@ -62,6 +62,7 @@ function agentFormConfig() {
     CAPTURE_DEVICE: $("agentDevice").value,
     INPUT_CHANNELS: $("agentChannels").value,
     GPS_CHANNEL: $("agentGpsChannel").value,
+    TELEMETRY_FORMAT: $("agentTelemetryFormat").value,
     GPS_RECEIVER_HOST: $("agentReceiverHost").value,
     GPS_RECEIVER_PCM_PORT: $("agentReceiverPort").value,
     SAMPLE_RATE: $("agentSampleRate").value,
@@ -82,6 +83,7 @@ function updateAgent(status) {
     "agentDevice",
     "agentChannels",
     "agentGpsChannel",
+    "agentTelemetryFormat",
     "agentReceiverHost",
     "agentReceiverPort",
     "agentSampleRate",
@@ -92,7 +94,8 @@ function updateAgent(status) {
   $("agentLog").textContent = logs.length ? logs[logs.length - 1] : "";
   if (!captureAgentInitialized) {
     $("agentChannels").value = config.INPUT_CHANNELS || "4";
-    rebuildAgentGpsChannels(config.GPS_CHANNEL || 4);
+    $("agentTelemetryFormat").value = config.TELEMETRY_FORMAT || "nnn";
+    rebuildAgentGpsChannels(config.GPS_CHANNEL || 3);
     $("agentReceiverHost").value = config.GPS_RECEIVER_HOST || "127.0.0.1";
     $("agentReceiverPort").value = config.GPS_RECEIVER_PCM_PORT || "9010";
     $("agentSampleRate").value = config.SAMPLE_RATE || "48000";
@@ -197,7 +200,7 @@ async function refreshSystemStatus() {
       ["最新ログ", capture.output?.last_log],
     ]);
     renderServiceDetails("receiverServiceDetails", [
-      ["E2Eヘルス", e2e.ok ? `OK・${e2e.address || "-"}・${e2e.checked_at || ""}` : `NG・${e2e.error || e2e.status || "未確認"}`],
+      ["E2Eヘルス", e2e.ok ? `MapSystem OK・${e2e.address || "-"}・${e2e.checked_at || ""}` : `MapSystem NG・${e2e.error || e2e.status || "未確認"}`],
       ["E2E通知", e2e.notification?.enabled === false
         ? "無効"
         : e2e.notification?.configured
@@ -460,7 +463,7 @@ function update(payload) {
 
   $("decoded").textContent = payload.decoded_count ?? 0;
   $("samples").textContent = payload.total_samples ?? 0;
-  $("channel").textContent = `CH${cfg.gps_channel || 4}`;
+  $("channel").textContent = `${cfg.telemetry_format === "nnn" ? "NNN" : "MapSystem"} / CH${cfg.gps_channel || 3}`;
   $("inputStatus").textContent = inputStatusLabel(payload);
   $("csvPath").textContent = cfg.output_csv || "";
   const geocodeOk = payload.geocode_success_count ?? 0;
@@ -511,6 +514,11 @@ function connect() {
 
 $("agentChannels").addEventListener("change", () => {
   rebuildAgentGpsChannels($("agentGpsChannel").value);
+});
+$("agentTelemetryFormat").addEventListener("change", () => {
+  const channel = $("agentTelemetryFormat").value === "nnn" ? 3 : 4;
+  if (Number($("agentChannels").value) < channel) $("agentChannels").value = "4";
+  rebuildAgentGpsChannels(channel);
 });
 $("agentRefreshBtn").addEventListener("click", () => {
   loadAgentDevices().catch((error) => {

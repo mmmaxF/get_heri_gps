@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from gps_demodulator import DEFAULT_BAUD, crc16_x25, decode_samples
+from nnn_demodulator import decode_nnn_samples
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -64,7 +65,7 @@ SAMPLE_RATE = env_int("SAMPLE_RATE", 48000)
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = env_int("PORT", 8010)
 DEFAULT_OUTPUT_CSV = Path(os.environ.get("OUTPUT_CSV", OUTPUT_DIR / "gps_positions.csv"))
-DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 2)
+DEFAULT_INPUT_CHANNELS = env_int("INPUT_CHANNELS", 4)
 DEFAULT_REVERSE_GEOCODER_URL = os.environ.get("REVERSE_GEOCODER_URL", "http://reverse-geocoder:8020/api/position")
 ATEM_OUTPUT_HEALTH_URL = os.environ.get("ATEM_OUTPUT_HEALTH_URL", "http://atem-output:8030/api/health")
 ATEM_OUTPUT_FREE_TEXT_URL = os.environ.get("ATEM_OUTPUT_FREE_TEXT_URL", "http://atem-output:8030/api/free-text")
@@ -149,7 +150,8 @@ def format_japanese_time(dt):
 @dataclass
 class RuntimeConfig:
     mode: str = "socket"
-    gps_channel: int = env_int("GPS_CHANNEL", 4)
+    gps_channel: int = env_int("GPS_CHANNEL", 3)
+    telemetry_format: str = os.environ.get("TELEMETRY_FORMAT", "nnn")
     input_channels: int = DEFAULT_INPUT_CHANNELS
     pcm_socket_host: str = PCM_SOCKET_HOST
     pcm_socket_port: int = PCM_SOCKET_PORT
@@ -237,6 +239,8 @@ class AppState:
                         if val not in {"socket", "test"}:
                             raise ValueError("mode must be 'socket' or 'test'")
                     normalized[key] = val
+                    if key == "telemetry_format" and val not in {"nnn", "mapsystem"}:
+                        raise ValueError("telemetry_format must be nnn or mapsystem")
             if self.running:
                 changed = [key for key, val in normalized.items() if getattr(self.config, key) != val]
                 if changed:
@@ -324,6 +328,7 @@ class AppState:
         with self.lock:
             self.config.input_channels = int(header["channels"])
             self.config.gps_channel = int(header["gps_channel"])
+            self.config.telemetry_format = header.get("telemetry_format", "mapsystem")
 
     def set_samples(self, total_samples):
         with self.lock:
@@ -993,6 +998,8 @@ def iter_socket_chunks(config, stop_event):
                         )
                     input_channels = int(header["channels"])
                     gps_channel = int(header["gps_channel"])
+                    if header.get("telemetry_format", "mapsystem") not in {"nnn", "mapsystem"}:
+                        raise RuntimeError("unsupported telemetry_format")
                     if input_channels < 1 or not 1 <= gps_channel <= input_channels:
                         raise RuntimeError("invalid channels or gps_channel")
                 except (
@@ -1108,7 +1115,8 @@ def worker_main():
             if time.monotonic() < next_decode or len(sample_buffer) < SAMPLE_RATE * 4:
                 continue
             next_decode = time.monotonic() + config.decode_interval_seconds
-            fixes = decode_samples(sample_buffer, buffer_start_sample, sample_rate=SAMPLE_RATE)
+            decoder = decode_nnn_samples if config.telemetry_format == "nnn" else decode_samples
+            fixes = decoder(sample_buffer, buffer_start_sample, sample_rate=SAMPLE_RATE)
             if fixes:
                 LOGGER.info("flow=demod decode_ok fixes=%s buffer_samples=%s buffer_start=%s", len(fixes), len(sample_buffer), buffer_start_sample)
             else:

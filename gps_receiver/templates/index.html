@@ -51,6 +51,13 @@
         </div>
 
         <div class="capture-grid">
+          <label>
+            <span>GPS方式</span>
+            <select id="agentTelemetryFormat">
+              <option value="nnn" selected>NNN</option>
+              <option value="mapsystem">MapSystem</option>
+            </select>
+          </label>
           <label class="device-control">
             <span>音声入力デバイス</span>
             <select id="agentDevice">
@@ -72,8 +79,8 @@
             <select id="agentGpsChannel">
               <option value="1">CH1</option>
               <option value="2">CH2</option>
-              <option value="3">CH3</option>
-              <option value="4" selected>CH4</option>
+              <option value="3" selected>CH3</option>
+              <option value="4">CH4</option>
             </select>
           </label>
         </div>
@@ -130,7 +137,7 @@
               <span>Dockerコンテナ</span>
               <strong>get-heri-gps</strong>
               <em id="receiverServiceStatus">確認中</em>
-              <button id="e2eHealthBtn" class="small-action" type="button">E2Eヘルス確認</button>
+              <button id="e2eHealthBtn" class="small-action" type="button">MapSystem E2E確認</button>
               <small id="e2eHealthStatus"></small>
               <button class="danger small-action container-restart-btn" type="button" data-container="get-heri-gps">コンテナ再起動</button>
               <small id="restartStatus-get-heri-gps"></small>
@@ -184,7 +191,7 @@
         </div>
         <div>
           <span>選択CH</span>
-          <strong id="channel">CH4</strong>
+          <strong id="channel">NNN / CH3</strong>
         </div>
         <div>
           <span>入力サンプル</span>
@@ -232,6 +239,6 @@
         </div>
       </section>
     </main>
-    <script src="/static/app.js?v=20260821-atem-free-text-v1"></script>
+    <script src="/static/app.js?v=20260910-nnn-v1"></script>
   </body>
 </html>

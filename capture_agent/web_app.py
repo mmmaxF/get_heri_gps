@@ -28,6 +28,7 @@ CONFIG_KEYS = (
     "SAMPLE_FORMAT",
     "INPUT_CHANNELS",
     "GPS_CHANNEL",
+    "TELEMETRY_FORMAT",
     "CAPTURE_DEVICE",
     "CAPTURE_COMMAND",
     "AGENT_NAME",
@@ -44,7 +45,8 @@ DEFAULTS = {
     "SAMPLE_RATE": "48000",
     "SAMPLE_FORMAT": "S16_LE",
     "INPUT_CHANNELS": "4",
-    "GPS_CHANNEL": "4",
+    "GPS_CHANNEL": "3",
+    "TELEMETRY_FORMAT": "nnn",
     "CAPTURE_DEVICE": "hw:2,0",
     "CAPTURE_COMMAND": "",
     "AGENT_NAME": "sdi-capture-01",
@@ -86,6 +88,7 @@ SAMPLE_RATE={values["SAMPLE_RATE"]}
 SAMPLE_FORMAT={values["SAMPLE_FORMAT"]}
 INPUT_CHANNELS={values["INPUT_CHANNELS"]}
 GPS_CHANNEL={values["GPS_CHANNEL"]}
+TELEMETRY_FORMAT={values["TELEMETRY_FORMAT"]}
 
 # Host capture
 CAPTURE_DEVICE={values["CAPTURE_DEVICE"]}
@@ -134,6 +137,8 @@ def normalize_config(payload: dict) -> dict[str, str]:
         raise ValueError("GPSチャンネルは入力チャンネル数以下にしてください")
     if values["SAMPLE_FORMAT"] != "S16_LE":
         raise ValueError("現在対応しているPCM形式はS16_LEだけです")
+    if values["TELEMETRY_FORMAT"] not in {"nnn", "mapsystem"}:
+        raise ValueError("TELEMETRY_FORMAT must be nnn or mapsystem")
     if not values["GPS_RECEIVER_HOST"]:
         raise ValueError("gps-receiverのホストを入力してください")
     if not values["CAPTURE_DEVICE"] and not values["CAPTURE_COMMAND"]:
