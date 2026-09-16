@@ -3,6 +3,7 @@
 
 import json
 import math
+import os
 import sqlite3
 from pathlib import Path
 
@@ -10,8 +11,20 @@ from pyproj import CRS, Transformer
 from shapely.geometry import LineString, Point
 
 
-OFFSHORE_DISTANCE_M = 3000
-OFFSHORE_SEARCH_M = 4000
+def _positive_env_float(name, default):
+    try:
+        value = float(os.environ.get(name, default))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive finite number (metres)") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive finite number (metres)")
+    return value
+
+
+OFFSHORE_DISTANCE_M = _positive_env_float("OFFSHORE_DISTANCE_M", "3000")
+OFFSHORE_SEARCH_M = _positive_env_float("OFFSHORE_SEARCH_M", "4000")
+if OFFSHORE_SEARCH_M <= OFFSHORE_DISTANCE_M:
+    raise ValueError("OFFSHORE_SEARCH_M must be greater than OFFSHORE_DISTANCE_M")
 
 
 def point_in_ring(lon, lat, ring):
