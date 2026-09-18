@@ -1396,6 +1396,8 @@ def system_status():
             "error": atem_error,
             "atem_enabled": bool(atem_body.get("atem_enabled")),
             "atem_host": atem_body.get("atem_host", ""),
+            "atem_source_ip": atem_body.get("atem_source_ip", ""),
+            "logs": atem_body.get("logs", []),
             "image_exists": bool(atem_body.get("image_exists")),
             "super_health": atem_body.get("super_health", {}),
             "latest": atem_body.get("latest", {}),

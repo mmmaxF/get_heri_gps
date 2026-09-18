@@ -15,6 +15,7 @@
 |---|---|
 | ATEMスーパー、撮影位置、PNG送信 | [atem.md](atem.md) |
 | マルチビューア送信 | [multiviewer.md](multiviewer.md) |
+| 陸上・海上の住所判定、海岸線データ | [geocoder.md](geocoder.md) |
 
 ## 開発・確認用
 

@@ -7,8 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from pyproj import CRS, Transformer
-from shapely.geometry import LineString, Point
+from coastline import CoastlineIndex
 
 
 def _positive_env_float(name, default):
@@ -50,10 +49,13 @@ def point_in_polygon(lon, lat, rings):
 
 
 class AdminGeocoder:
-    def __init__(self, db_path):
+    def __init__(self, db_path, coastline_path=None):
         self.db_path = Path(db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        coastline_path = coastline_path or os.environ.get(
+            "GEOCODER_COASTLINE_DB_PATH", str(self.db_path.parent / "coastline.sqlite"))
+        self.coastline = CoastlineIndex(coastline_path)
 
     def area_count(self):
         row = self.conn.execute("SELECT COUNT(*) AS c FROM areas").fetchone()
@@ -83,7 +85,7 @@ class AdminGeocoder:
                     "address_label": address,
                     "admin_code": row["admin_code"] or "",
                 }
-        offshore = self._find_nearest_prefecture(lat, lon)
+        offshore = self._find_nearest_coastal_city(lat, lon)
         if offshore is not None:
             return offshore
         return {
@@ -96,49 +98,16 @@ class AdminGeocoder:
             "admin_code": "",
         }
 
-    def _find_nearest_prefecture(self, lat, lon):
-        # Conservative candidate window for Japan; final distances are in metres.
-        lat_delta = OFFSHORE_SEARCH_M / 111_000
-        lon_delta = OFFSHORE_SEARCH_M / (111_000 * math.cos(math.radians(lat)))
-        rows = self.conn.execute(
-            """
-            SELECT prefecture, geometry_json
-            FROM areas
-            WHERE min_lat <= ? AND max_lat >= ?
-              AND min_lon <= ? AND max_lon >= ?
-            ORDER BY prefecture
-            """,
-            (lat + lat_delta, lat - lat_delta, lon + lon_delta, lon - lon_delta),
-        ).fetchall()
-        if not rows:
+    def _find_nearest_coastal_city(self, lat, lon):
+        nearest = self.coastline.nearest(lat, lon, OFFSHORE_DISTANCE_M, OFFSHORE_SEARCH_M)
+        if nearest is None:
             return None
-
-        local_crs = CRS.from_proj4(
-            f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m"
-        )
-        transformer = Transformer.from_crs("EPSG:4326", local_crs, always_xy=True)
-        origin = Point(0, 0)
-        nearest_distance = float("inf")
-        nearest_prefecture = None
-        for row in rows:
-            for ring in json.loads(row["geometry_json"]):
-                if len(ring) < 2:
-                    continue
-                # Imported rings are normally closed, but close them explicitly.
-                coordinates = ring if ring[0] == ring[-1] else ring + [ring[0]]
-                xs, ys = transformer.transform(*zip(*coordinates))
-                distance = origin.distance(LineString(zip(xs, ys)))
-                if distance < nearest_distance:
-                    nearest_distance = distance
-                    nearest_prefecture = row["prefecture"]
-
-        if nearest_distance > OFFSHORE_DISTANCE_M:
-            return None
+        prefecture, city, ward, admin_code = nearest
         return {
             "ok": True,
-            "prefecture": nearest_prefecture,
-            "city": "",
-            "ward": "",
-            "address_label": f"{nearest_prefecture}沖",
-            "admin_code": "",
+            "prefecture": prefecture,
+            "city": city,
+            "ward": ward or "",
+            "address_label": f"{prefecture}{city}沖",
+            "admin_code": admin_code or "",
         }

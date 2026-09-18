@@ -16,4 +16,10 @@ if [ ! -f "$DB_PATH" ]; then
   python /app/import_admin_areas.py --empty
 fi
 
+if [ "${GEOCODER_COASTLINE_AUTO_UPDATE:-1}" != "0" ]; then
+  python /app/import_coastlines.py || {
+    echo "海岸線DBの作成に失敗しました。既存の海岸線DBがあればそれを使います。" >&2
+  }
+fi
+
 python /app/app.py

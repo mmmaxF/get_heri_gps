@@ -163,6 +163,9 @@ async function refreshSystemStatus() {
     const atem = status.atem_output || {};
     const atemLatest = atem.latest || {};
     const atemSuper = atem.super_health || {};
+    $("atemLog").textContent = (atem.logs || []).map((entry) =>
+      `${entry.time} 送信元IP=${entry.source_ip || "未設定"} ${entry.message}`
+    ).join("\n") || "ATEM送信ログ待ち";
     setServiceStatus(
       "captureServiceStatus",
       capture.ok && capture.running,
@@ -251,6 +254,7 @@ async function refreshSystemStatus() {
           ? `有効・最終試行 ${atemProbe.last_attempt_at}${atemProbe.last_error ? ` / ${atemProbe.last_error}` : ""}`
           : "有効・成功待ち";
     renderServiceDetails("atemServiceDetails", [
+      ["送信元IP", atem.atem_source_ip || "未設定"],
       ["ATEM接続", atem.atem_enabled ? `${atem.atem_host || "-"}（有効）` : "無効・PNG生成のみ"],
       ["スーパー可否", atemSuperText],
       ["自動ヘルス送信", atemProbeText],

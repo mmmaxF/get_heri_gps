@@ -16,7 +16,7 @@ from pathlib import Path
 import shapefile
 
 
-DEFAULT_N03_URL = "https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026/N03-20260101_56_GML.zip"
+DEFAULT_N03_URL = "https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2026/N03-20260101_GML.zip"
 DB_PATH = Path(os.environ.get("GEOCODER_DB_PATH", "/app/data/admin_area.sqlite"))
 DATA_URL = os.environ.get("GEOCODER_DATA_URL", DEFAULT_N03_URL)
 UPDATE_DAYS = int(float(os.environ.get("GEOCODER_UPDATE_DAYS", "30")))
@@ -30,6 +30,9 @@ def db_is_fresh(path):
         with sqlite3.connect(path) as conn:
             row = conn.execute("SELECT COUNT(*) FROM areas").fetchone()
             if not row or int(row[0]) <= 0:
+                return False
+            source = conn.execute("SELECT value FROM metadata WHERE key = 'source_url'").fetchone()
+            if not source or source[0] != DATA_URL:
                 return False
     except sqlite3.Error:
         return False

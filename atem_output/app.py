@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import json
+from collections import deque
 import logging
 import os
 import subprocess
@@ -94,6 +95,7 @@ MIN_UPDATE_SECONDS = env_float("MIN_UPDATE_SECONDS", 3.0)
 
 ATEM_ENABLED = env_bool("ATEM_ENABLED", False)
 ATEM_HOST = os.environ.get("ATEM_HOST", "").strip()
+ATEM_SOURCE_IP = os.environ.get("ATEM_SOURCE_IP", "").strip()
 ATEM_CONNECT_TIMEOUT_SECONDS = env_float("ATEM_CONNECT_TIMEOUT_SECONDS", 8.0)
 ATEM_UPLOAD_TIMEOUT_SECONDS = env_float("ATEM_UPLOAD_TIMEOUT_SECONDS", 20.0)
 ATEM_MEDIA_POOL_SLOT = env_int("ATEM_MEDIA_POOL_SLOT", 1)
@@ -138,7 +140,21 @@ def setup_logger():
     return logger
 
 
+ATEM_LOGS = deque(maxlen=100)
+
+
+class UiLogHandler(logging.Handler):
+    def emit(self, record):
+        ATEM_LOGS.append({
+            "time": datetime.fromtimestamp(record.created, JST).strftime("%Y/%m/%d %H:%M:%S"),
+            "message": record.getMessage(),
+            "source_ip": ATEM_SOURCE_IP,
+        })
+
+
 LOGGER = setup_logger()
+UI_LOG_HANDLER = UiLogHandler()
+LOGGER.addHandler(UI_LOG_HANDLER)
 app = FastAPI(title="atem_output")
 lock = threading.Lock()
 
@@ -940,6 +956,8 @@ def health():
         "service": "atem-output",
         "atem_enabled": ATEM_ENABLED,
         "atem_host": ATEM_HOST,
+        "atem_source_ip": ATEM_SOURCE_IP,
+        "logs": list(ATEM_LOGS),
         "async_upload": ATEM_ASYNC_UPLOAD,
         "upload_worker": ATEM_WORKER.snapshot(),
         "image_exists": LATEST_IMAGE.exists(),
